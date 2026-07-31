@@ -8,3 +8,4 @@ package-lock.json
 php_errors.log
 public/dev-server.err.log
 public/dev-server.out.log
+/.idea
