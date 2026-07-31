@@ -6,6 +6,13 @@ require APP_ROOT . '/app/report_service.php';
 
 $range = business_report_range('this_year', null, null);
 $catalog = business_report_flat_catalog();
+$cashflowSql = business_report_definition('combined_cashflow', 'monthly', $range['start'], $range['end'])['sql'];
+$overviewSql = business_report_definition('executive_overview', 'monthly', $range['start'], $range['end'])['sql'];
+foreach ([$cashflowSql,$overviewSql] as $sql) {
+    if (!str_contains($sql,'k.Islem=1') || !str_contains($sql,'k.Islem=2')) {
+        throw new RuntimeException('Cash report direction must use Islem=1 for income and Islem=2 for expense.');
+    }
+}
 $failures = [];
 foreach ($catalog as $id => $report) {
     try {

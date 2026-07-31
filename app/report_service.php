@@ -217,23 +217,25 @@ function business_report_definition(string $id, string $grouping, string $start,
     if (in_array($id, ['income_collections','outgoing_payments','expenses','combined_cashflow','cash_bank_channels','expense_categories'], true)) {
         $pk=$period('k.islemTarihi'); $pb=$period('b.tarih');
         $events="SELECT $pk Donem,'Kasa' Kanal,k.KategoriID,
-                    SUM(CASE WHEN k.Islem=1 THEN k.Miktar ELSE 0 END) Tahsilat,SUM(CASE WHEN k.Islem=2 THEN k.Miktar ELSE 0 END) Odeme,COUNT(*) Islem
+                    SUM(CASE WHEN k.Islem=1 THEN k.Miktar ELSE 0 END) Tahsilat,SUM(CASE WHEN k.Islem=2 THEN k.Miktar ELSE 0 END) Odeme,
+                    SUM(CASE WHEN k.Islem=1 THEN 1 ELSE 0 END) GelirIslem,SUM(CASE WHEN k.Islem=2 THEN 1 ELSE 0 END) GiderIslem,COUNT(*) Islem
                 FROM kasa k WHERE {$range('k.islemTarihi')} GROUP BY $pk,k.KategoriID
                 UNION ALL
-                SELECT $pb,'Banka',b.kategoriID,SUM(CASE WHEN b.yatirildi=1 THEN b.para ELSE 0 END),SUM(CASE WHEN b.cekildi=1 THEN b.para ELSE 0 END),COUNT(*)
+                SELECT $pb,'Banka',b.kategoriID,SUM(CASE WHEN b.yatirildi=1 THEN b.para ELSE 0 END),SUM(CASE WHEN b.cekildi=1 THEN b.para ELSE 0 END),
+                    SUM(CASE WHEN b.yatirildi=1 THEN 1 ELSE 0 END),SUM(CASE WHEN b.cekildi=1 THEN 1 ELSE 0 END),COUNT(*)
                 FROM banka_kasa b WHERE {$range('b.tarih')} GROUP BY $pb,b.kategoriID";
         $params=$dateParams(2);
         if ($id==='cash_bank_channels') {
             $sql="SELECT Donem,Kanal,SUM(Islem) Islem,ROUND(SUM(Tahsilat),2) Tahsilat,ROUND(SUM(Odeme),2) Odeme,ROUND(SUM(Tahsilat)-SUM(Odeme),2) NetNakit FROM ($events) e GROUP BY Donem,Kanal";
             $columns=['Donem'=>'Dönem','Kanal'=>'Kanal','Islem'=>'İşlem','Tahsilat'=>'Giriş','Odeme'=>'Çıkış','NetNakit'=>'Net'];
         } elseif ($id==='expense_categories') {
-            $sql="SELECT e.Donem,COALESCE(k.kategori,CONCAT('Kategori #',e.KategoriID)) Kategori,SUM(e.Islem) Islem,ROUND(SUM(e.Odeme),2) Odeme,ROUND(AVG(NULLIF(e.Odeme,0)),2) Ortalama FROM ($events) e LEFT JOIN kategoriler k ON k.ID=e.KategoriID GROUP BY e.Donem,e.KategoriID,Kategori HAVING Odeme>0";
+            $sql="SELECT e.Donem,COALESCE(k.kategori,CONCAT('Kategori #',e.KategoriID)) Kategori,SUM(e.GiderIslem) Islem,ROUND(SUM(e.Odeme),2) Odeme,ROUND(AVG(NULLIF(e.Odeme,0)),2) Ortalama FROM ($events) e LEFT JOIN kategoriler k ON k.ID=e.KategoriID GROUP BY e.Donem,e.KategoriID,Kategori HAVING Odeme>0";
             $columns=['Donem'=>'Dönem','Kategori'=>'Kategori','Islem'=>'İşlem','Odeme'=>'Gider','Ortalama'=>'Ortalama'];
         } else {
             $sql="SELECT Donem,ROUND(SUM(Tahsilat),2) Tahsilat,ROUND(SUM(Odeme),2) Odeme,ROUND(SUM(Tahsilat)-SUM(Odeme),2) NetNakit,SUM(Islem) Islem FROM ($events) e GROUP BY Donem";
             $columns=['Donem'=>'Dönem','Tahsilat'=>'Tahsilat','Odeme'=>'Ödeme / Gider','NetNakit'=>'Net Nakit','Islem'=>'İşlem'];
-            if($id==='income_collections') {$sql="SELECT Donem,ROUND(SUM(Tahsilat),2) Tahsilat,SUM(Islem) Islem FROM ($events) e GROUP BY Donem HAVING Tahsilat>0";$columns=['Donem'=>'Dönem','Tahsilat'=>'Tahsilat','Islem'=>'İşlem'];}
-            if(in_array($id,['outgoing_payments','expenses'],true)) {$sql="SELECT Donem,ROUND(SUM(Odeme),2) Odeme,SUM(Islem) Islem FROM ($events) e GROUP BY Donem HAVING Odeme>0";$columns=['Donem'=>'Dönem','Odeme'=>$id==='expenses'?'Gider':'Ödeme','Islem'=>'İşlem'];}
+            if($id==='income_collections') {$sql="SELECT Donem,ROUND(SUM(Tahsilat),2) Tahsilat,SUM(GelirIslem) Islem FROM ($events) e GROUP BY Donem HAVING Tahsilat>0";$columns=['Donem'=>'Dönem','Tahsilat'=>'Tahsilat','Islem'=>'İşlem'];}
+            if(in_array($id,['outgoing_payments','expenses'],true)) {$sql="SELECT Donem,ROUND(SUM(Odeme),2) Odeme,SUM(GiderIslem) Islem FROM ($events) e GROUP BY Donem HAVING Odeme>0";$columns=['Donem'=>'Dönem','Odeme'=>$id==='expenses'?'Gider':'Ödeme','Islem'=>'İşlem'];}
         }
         $definition=['sql'=>$sql,'params'=>$params,'columns'=>$columns,'chart'=>array_values(array_intersect(['Tahsilat','Odeme','NetNakit'],array_keys($columns)))];
     }

@@ -61,7 +61,6 @@ return [
     'kasa' => [
         ['label'=>'Cari Kartı','target'=>'adresdefteri','filter'=>'ID','value'=>'MusteriID'],
         ['label'=>'Fatura','target'=>'faturabaslik','filter'=>'ID','value'=>'FaturaID'],
-        ['label'=>'Çek / Senet','target'=>'cek_senet_kasa','filter'=>'ID','value'=>'ceksenetID'],
         ['label'=>'Ürün','target'=>'asp_urun','filter'=>'ID','value'=>'UrunID'],
         ['label'=>'Kategori','target'=>'kategoriler','filter'=>'ID','value'=>'KategoriID'],
         ['label'=>'Bu Kayıtla Ödenen Faturalar','target'=>'faturabaslik','filter'=>'odemeKasaID','value'=>'ID'],
@@ -92,7 +91,6 @@ return [
         ['label'=>'Ciro Edilen Cari','target'=>'adresdefteri','filter'=>'ID','value'=>'ciro_firmaID'],
         ['label'=>'Banka Hesabı','target'=>'hesaplar','filter'=>'ID','value'=>'banka_hesapID'],
         ['label'=>'Verilen Banka','target'=>'hesaplar','filter'=>'ID','value'=>'verilen_bankaID'],
-        ['label'=>'Kasa Hareketleri','target'=>'kasa','filter'=>'ceksenetID','value'=>'ID'],
         ['label'=>'Banka Hareketleri','target'=>'banka_kasa','filter'=>'cekID','value'=>'ID'],
         ['label'=>'Tahsil Kasa Kaydı','target'=>'kasa','filter'=>'ID','value'=>'tahsil_kasaID'],
         ['label'=>'Ödeme Kasa Kaydı','target'=>'kasa','filter'=>'ID','value'=>'ode_kasaID'],

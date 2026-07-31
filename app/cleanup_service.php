@@ -447,7 +447,7 @@ function cleanup_address_financial_reference_details(int $id): array
 
     $groups = [
         cleanup_address_financial_detail_group('invoice_lines', 'Fatura satırları', 'faturadetay', '`musteriID` = ?', [$id], ['ID','faturaID','urunID','urunAD','miktar','urunEder']),
-        cleanup_address_financial_detail_group('cash', 'Kasa hareketleri', 'kasa', '`MusteriID` = ?', [$id], ['ID','islemTarihi','Miktar','Islem','BelgeNo','FaturaID','Aciklama']),
+        cleanup_address_financial_detail_group('cash', 'Kasa hareketleri', 'kasa', '`MusteriID` = ?', [$id], ['ID','islemTarihi','Miktar','Islem','FaturaID','Aciklama']),
         cleanup_address_financial_detail_group('bank', 'Banka hareketleri', 'banka_kasa', '`musteriID` = ?', [$id], ['ID','tarih','para','hesapID','faturaID','aciklama']),
         cleanup_address_financial_detail_group('checks_owner', 'Çek / senet — firma', 'cek_senet_kasa', '`firmaID` = ?', [$id], ['ID','cekNo','miktar','bas_tarih','vade_tarih','cek_senet','aciklama']),
         cleanup_address_financial_detail_group('checks_endorsed', 'Çek / senet — ciro edilen cari', 'cek_senet_kasa', '`ciro_firmaID` = ?', [$id], ['ID','cekNo','miktar','ciro_date','vade_tarih','cek_senet','aciklama']),
@@ -491,7 +491,7 @@ function cleanup_related_header_ids(string $detailTable, array $productIds): arr
 
 function cleanup_delete_in(string $table, string $column, array $ids): int
 {
-    if ($ids === []) return 0;
+    if ($ids === [] || !cleanup_table_exists($table) || !cleanup_column_exists($table, $column)) return 0;
     $statement = db()->prepare("DELETE FROM `$table` WHERE `$column` IN (" . cleanup_placeholders($ids) . ')');
     $statement->execute($ids);
     return $statement->rowCount();
@@ -759,6 +759,11 @@ function cleanup_legacy_manifest(): array
             'table' => 'asp_urun',
             'columns' => ['yazarlistetxt', 'yayinevitxt'],
             'equivalent_ids' => ['CinYazarID', 'ureticiID'],
+        ],
+        'kasa.unused_fields' => [
+            'kind' => 'drop_columns',
+            'table' => 'kasa',
+            'columns' => ['CaridenGizle','BelgeNo','ceksenetID'],
         ],
         'banka_kasa.assign' => ['table' => 'banka_kasa', 'column' => 'assign', 'populated' => '`assign` <> 0'],
         'banka_kasa.kasaID' => ['table' => 'banka_kasa', 'column' => 'kasaID', 'populated' => '`kasaID` <> 0'],

@@ -307,6 +307,7 @@ try {
                 'comment' => $column['Comment'],
                 'relation' => $config['relations'][$name] ?? null,
                 'missing_label' => $config['relation_missing'][$name] ?? null,
+                'value_labels' => $config['value_labels'][$name] ?? null,
             ];
         }
         json_response([
@@ -387,6 +388,15 @@ try {
             if (in_array($name, $virtualColumns, true)) continue;
             $baseColumn = '`base`.' . quoted_identifier($name);
             $relation = $config['relations'][$name] ?? null;
+            $valueLabels = $config['value_labels'][$name] ?? null;
+            if ($relation === null && is_array($valueLabels) && $valueLabels !== []) {
+                $cases = [];
+                foreach ($valueLabels as $storedValue => $displayLabel) {
+                    $cases[] = 'WHEN ' . $baseColumn . ' = ' . db()->quote((string) $storedValue) . ' THEN ' . db()->quote((string) $displayLabel);
+                }
+                $selectExpressions[] = 'CASE ' . implode(' ', $cases) . " ELSE CONCAT('Bilinmeyen işlem (#', CAST($baseColumn AS CHAR), ')') END AS " . quoted_identifier($name);
+                continue;
+            }
             if ($relation === null) {
                 $selectExpressions[] = $baseColumn . ' AS ' . quoted_identifier($name);
                 continue;

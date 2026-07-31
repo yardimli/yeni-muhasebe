@@ -111,6 +111,7 @@ cleanup_assert(cleanup_page_size(5000) === 5000, 'The 5,000-row preview size is 
 cleanup_assert(count(cleanup_legacy_status()) === count(cleanup_legacy_manifest()), 'Legacy field audit is incomplete.');
 $legacy = cleanup_legacy_manifest();
 cleanup_assert(in_array('Bakiye', $legacy['adresdefteri.unused_fields']['columns'] ?? [], true), 'Cari Bakiye cleanup is missing.');
+cleanup_assert(($legacy['kasa.unused_fields']['columns'] ?? []) === ['CaridenGizle','BelgeNo','ceksenetID'], 'Kasa unused-field cleanup is incomplete.');
 cleanup_assert(($legacy['cari_agac.tables']['tables'] ?? []) === ['adres_defter_agac_iliskileri','adres_agac'], 'Cari tree table cleanup is incomplete or ordered incorrectly.');
 cleanup_assert(($legacy['currency.tables_and_references']['columns'] ?? []) === ['asp_urun.kurID','banka_kasa.kurID','hesaplar.kurID','kasa.KurID'], 'Currency reference cleanup is incomplete.');
 cleanup_assert(($legacy['currency.tables_and_references']['tables'] ?? []) === ['kurhareketleri','kurlar'], 'Currency table cleanup is incomplete or ordered incorrectly.');

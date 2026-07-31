@@ -57,6 +57,8 @@
     if (win.kind === 'invoice') return {...base, state: {id: s.id, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'editor') return {...base, state: {table: s.table, label: s.label, id: s.id || null, parentKey: s.parentKey || null}};
     if (win.kind === 'settings') return {...base, state: {section: s.section}};
+    if (win.kind === 'production_list') return {...base, state: {view: s.view, label: s.label, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
+    if (win.kind === 'production_project') return {...base, state: {id: s.id || null}};
     return null;
   }
 
@@ -75,7 +77,7 @@
   function storedWindowDescriptors() {
     try {
       const parsed = JSON.parse(localStorage.getItem(windowStorageKey) || '[]');
-      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings'].includes(item.kind) && item.state) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings', 'production_list', 'production_project'].includes(item.kind) && item.state) : [];
     } catch (_) {
       return [];
     }
@@ -148,6 +150,18 @@
     const data = await response.json().catch(() => ({error: 'Invalid server response.'}));
     if (response.status === 401) location.reload();
     if (!response.ok) throw new Error(data.error || 'Request failed.');
+    return data;
+  };
+
+  const productionApi = async (url, options = {}) => {
+    const response = await fetch(`production_api.php${url}`, {
+      ...options,
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json', ...(options.body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrf} : {}), ...(options.headers || {}) }
+    });
+    const data = await response.json().catch(() => ({error: 'Geçersiz üretim sunucu yanıtı.'}));
+    if (response.status === 401) location.reload();
+    if (!response.ok) throw new Error(data.error || 'Üretim isteği tamamlanamadı.');
     return data;
   };
 
@@ -338,6 +352,9 @@
 
   function dataUrlForWindow(win, page, perPage) {
     const s = win.state;
+    if (win.kind === 'production_list') {
+      return `?action=list&view=${encodeURIComponent(s.view)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}`;
+    }
     if (win.kind === 'invoice') {
       return `?action=invoice&id=${encodeURIComponent(s.id)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}`;
     }
@@ -359,7 +376,9 @@
     let moneyColumns = [];
     let currency = 'TL';
     do {
-      const data = await api(dataUrlForWindow(win, page, 1000));
+      const data = win.kind === 'production_list'
+        ? await productionApi(dataUrlForWindow(win, page, 1000))
+        : await api(dataUrlForWindow(win, page, 1000));
       columns = data.columns;
       moneyColumns = data.money_columns || [];
       currency = data.currency || currency;
@@ -727,6 +746,10 @@
   function inputForField(field, value, table = '') {
     const name = escapeHtml(field.name), raw = value ?? field.default ?? '';
     if (field.extra.toLowerCase().includes('auto_increment')) return `<input class="form-input bg-slate-100" value="${escapeHtml(raw)}" disabled>`;
+    if (field.value_labels && Object.keys(field.value_labels).length) {
+      const options = Object.entries(field.value_labels).map(([stored, label]) => `<option value="${escapeHtml(stored)}" ${String(raw) === String(stored) ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+      return `<select class="form-input" name="${name}">${options}</select>`;
+    }
     if (table === 'adresdefteri' && field.name === 'Kisisel') {
       const personal = Number(raw) === 1;
       return `<div class="flex gap-4 rounded border border-slate-300 bg-white px-3 py-2"><label class="flex items-center gap-2"><input type="radio" name="Kisisel" value="0" ${personal ? '' : 'checked'}> Kurumsal</label><label class="flex items-center gap-2"><input type="radio" name="Kisisel" value="1" ${personal ? 'checked' : ''}> Kişisel</label></div>`;
@@ -891,6 +914,131 @@
     return win;
   }
 
+  const productionInput = (name, definition, value) => {
+    const label = escapeHtml(definition.label || name);
+    const common = `name="${escapeHtml(name)}" data-production-field="${escapeHtml(name)}"`;
+    let control = '';
+    if (definition.type === 'boolean') {
+      control = `<label class="flex h-9 items-center gap-2 rounded border border-slate-300 bg-white px-3"><input type="checkbox" ${common} value="1" ${Number(value) !== 0 ? 'checked' : ''}><span class="text-sm">Evet / Açık</span></label>`;
+    } else if (definition.type === 'select') {
+      const options = [''].concat(definition.options || []).map(option => `<option value="${escapeHtml(option)}" ${String(value ?? '') === option ? 'selected' : ''}>${escapeHtml(option || '— Seçiniz —')}</option>`).join('');
+      control = `<select ${common} class="form-input">${options}</select>`;
+    } else if (definition.type === 'textarea') {
+      control = `<textarea ${common} class="form-input min-h-24">${escapeHtml(value ?? '')}</textarea>`;
+    } else {
+      const type = definition.type === 'money' || definition.type === 'number' ? 'number' : definition.type === 'email' ? 'email' : definition.type === 'date' ? 'date' : 'text';
+      const step = definition.type === 'money' ? ' step="0.01"' : definition.type === 'number' ? ' step="1"' : '';
+      const shown = definition.type === 'date' && value ? String(value).slice(0, 10) : value ?? '';
+      control = `<input ${common} type="${type}"${step} value="${escapeHtml(shown)}" class="form-input" ${definition.required ? 'required' : ''}>`;
+    }
+    return `<label class="block ${definition.type === 'textarea' ? 'md:col-span-2' : ''}"><span class="mb-1 block text-xs font-semibold text-slate-600">${label}${definition.required ? ' <span class="text-red-500">*</span>' : ''}</span>${control}</label>`;
+  };
+
+  async function openProductionList(view = 'all', label = 'Üretim Projeleri', restoredState = null) {
+    const win = createWindow(`production-list:${view}`, label, 1240, 720);
+    if (win.loaded) return win;
+    win.loaded = true;
+    win.kind = 'production_list';
+    win.state = {...{view, label, page: 1, perPage: 250, q: '', sort: 'ID', dir: 'desc'}, ...(restoredState || {}), view, label};
+    scheduleSaveOpenWindows();
+    win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button" data-new>＋ Yeni</button><button class="toolbar-button" data-refresh>↻ Yenile</button><button class="toolbar-button" data-export>⇩ Excel</button><button class="toolbar-button" data-print>▧ Yazdır / PDF</button><div class="ml-auto relative"><input class="form-input w-80 pr-9" data-search placeholder="Kitap, yazar, e-posta, ISBN veya sorumlu ara…"><span class="absolute right-3 top-2 text-slate-400">⌕</span></div></div><div class="min-h-0 flex-1 overflow-auto bg-white" data-grid></div><div class="flex h-11 shrink-0 items-center gap-3 border-t border-slate-300 bg-slate-100 px-3 text-sm"><span data-summary class="whitespace-nowrap text-slate-500"></span><label class="flex items-center gap-1 whitespace-nowrap text-xs text-slate-600">Satır <select data-per-page class="rounded border border-slate-300 bg-white px-2 py-1 text-xs"><option>50</option><option>100</option><option selected>250</option><option>500</option><option>1000</option></select></label><span class="text-xs text-blue-700">E-posta → Cari Kart → Ürün bağlantısı</span><div class="ml-auto flex items-center gap-2"><button class="toolbar-button h-8" data-prev>←</button><span data-page></span><button class="toolbar-button h-8" data-next>→</button></div></div></div>`;
+    const search = win.body.querySelector('[data-search]');
+    search.value = win.state.q;
+    let timer;
+    search.oninput = () => { clearTimeout(timer); timer = setTimeout(() => { win.state.q = search.value; win.state.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); }, 300); };
+    win.body.querySelector('[data-new]').onclick = () => openProductionProject(null);
+    win.body.querySelector('[data-refresh]').onclick = () => loadProductionList(win);
+    initializeOutputButtons(win);
+    win.body.querySelector('[data-per-page]').onchange = event => { win.state.perPage = Number(event.target.value); win.state.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); };
+    win.body.querySelector('[data-prev]').onclick = () => { if (win.state.page > 1) { win.state.page--; scheduleSaveOpenWindows(); loadProductionList(win); } };
+    win.body.querySelector('[data-next]').onclick = () => { if (win.state.page < (win.state.pages || 1)) { win.state.page++; scheduleSaveOpenWindows(); loadProductionList(win); } };
+    await loadProductionList(win);
+    return win;
+  }
+
+  async function loadProductionList(win) {
+    const grid = win.body.querySelector('[data-grid]');
+    grid.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">Üretim kayıtları yükleniyor…</div>';
+    try {
+      const s = win.state;
+      const data = await productionApi(dataUrlForWindow(win, s.page, s.perPage));
+      s.pages = data.pages; s.perPage = data.per_page;
+      const money = moneyColumnSet(data);
+      const sortable = new Set(data.sortable_columns || []);
+      const header = data.columns.map(column => `<th ${sortable.has(column) ? `data-sort="${escapeHtml(column)}"` : ''} class="sticky top-0 whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 ${sortable.has(column) ? 'cursor-pointer hover:bg-slate-300' : ''} ${money.has(column) ? 'text-right' : 'text-left'}">${escapeHtml(column)}${data.sort === column ? (data.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
+      const rows = data.rows.map(row => `<tr data-production-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50">${data.columns.map(column => { const value = money.has(column) ? formatMoney(row[column], data.currency) : String(row[column] ?? ''); const state = (column === 'CariBaglantisi' || column === 'UrunBaglantisi') && Number(row[column]) === 0 ? ' text-red-700' : ''; return `<td class="max-w-72 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${money.has(column) ? ' text-right tabular-nums' : ''}${state}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`).join('');
+      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Üretim kaydı bulunamadı.</td></tr>`}</tbody></table>`;
+      grid.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const name = th.dataset.sort; s.dir = s.sort === name && s.dir === 'asc' ? 'desc' : 'asc'; s.sort = name; s.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); });
+      grid.querySelectorAll('[data-production-id]').forEach(row => row.ondblclick = () => openProductionProject(Number(row.dataset.productionId)));
+      const first = data.total ? (data.page - 1) * data.per_page + 1 : 0;
+      const last = data.total ? first + data.rows.length - 1 : 0;
+      win.body.querySelector('[data-summary]').textContent = `${first.toLocaleString('tr-TR')}–${last.toLocaleString('tr-TR')} / ${data.total.toLocaleString('tr-TR')} kayıt`;
+      win.body.querySelector('[data-page]').textContent = `${data.page} / ${data.pages}`;
+      win.body.querySelector('[data-per-page]').value = String(data.per_page);
+      win.body.querySelector('[data-prev]').disabled = data.page <= 1;
+      win.body.querySelector('[data-next]').disabled = data.page >= data.pages;
+    } catch (error) { grid.innerHTML = `<div class="p-8 text-center text-sm text-red-700">${escapeHtml(error.message)}</div>`; }
+  }
+
+  function productionTransactionTable(type, rows, projectId, currency) {
+    const label = type === 'expense' ? 'Üretim Maliyeti' : 'Alınan Ödemeler';
+    const body = rows.map(row => `<tr data-production-transaction data-type="${type}" data-id="${escapeHtml(row.ID)}"><td class="p-1"><input type="date" data-date class="form-input" value="${escapeHtml(String(row.tarih || '').slice(0,10))}"></td><td class="p-1"><input data-description class="form-input" value="${escapeHtml(row.aciklama || '')}"></td><td class="p-1"><input type="number" step="0.01" data-amount class="form-input text-right" value="${escapeHtml(row.tutar || 0)}"></td><td class="p-1"><button type="button" class="toolbar-button h-8" data-save-transaction>Kaydet</button></td></tr>`).join('');
+    return `<section class="rounded border border-slate-300 bg-white"><header class="flex items-center border-b border-slate-300 bg-slate-100 px-3 py-2"><strong>${label}</strong><span class="ml-auto text-xs text-slate-500">${rows.length.toLocaleString('tr-TR')} hareket · ${escapeHtml(currency)}</span></header><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-50"><th class="p-2 text-left">Tarih</th><th class="p-2 text-left">Açıklama</th><th class="p-2 text-right">Tutar</th><th></th></tr></thead><tbody>${body}<tr data-production-transaction data-type="${type}" data-id="0" class="border-t border-blue-200 bg-blue-50"><td class="p-1"><input type="date" data-date class="form-input" value="${new Date().toISOString().slice(0,10)}"></td><td class="p-1"><input data-description class="form-input" placeholder="Yeni hareket açıklaması"></td><td class="p-1"><input type="number" step="0.01" data-amount class="form-input text-right" value="0"></td><td class="p-1"><button type="button" class="toolbar-button h-8 bg-blue-600 text-white" data-save-transaction>Ekle</button></td></tr></tbody></table></div></section>`;
+  }
+
+  async function openProductionProject(id = null, restoredState = null) {
+    id = id ? Number(id) : null;
+    const key = id ? `production-project:${id}` : `production-project:new:${Date.now()}`;
+    const win = createWindow(key, id ? `Üretim Kaydı #${id}` : 'Yeni Üretim Kaydı', 1180, 780, {relationship: Boolean(id)});
+    if (win.loaded) return win;
+    win.loaded = true; win.kind = 'production_project'; win.state = {...(restoredState || {}), id};
+    scheduleSaveOpenWindows();
+    await loadProductionProject(win);
+    return win;
+  }
+
+  async function loadProductionProject(win) {
+    win.body.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">Üretim kaydı yükleniyor…</div>';
+    try {
+      const data = win.state.id ? await productionApi(`?action=detail&id=${win.state.id}`) : {...await productionApi('?action=metadata'), record: {}, expenses: [], payments: [], summary: {cost:0,payment:0,balance:0}, main_links: {accounts:[],products:[]}};
+      const record = data.record || {};
+      if (win.state.id) updateWindowTitle(win, `Üretim — ${record.KitabinAdi || 'Adsız kitap'} (#${win.state.id})`);
+      const groups = Object.entries(data.groups || {}).map(([group, fields], index) => `<details class="rounded border border-slate-300 bg-white" ${index < 3 ? 'open' : ''}><summary class="cursor-pointer bg-slate-100 px-3 py-2 text-sm font-semibold">${escapeHtml(group)}</summary><div class="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">${Object.entries(fields).map(([name, definition]) => productionInput(name, definition, record[name])).join('')}</div></details>`).join('');
+      const accounts = (data.main_links?.accounts || []).map(account => `<div class="flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs"><strong>#${escapeHtml(account.ID)} — ${escapeHtml(account.name || 'Adsız cari')}</strong><span class="text-slate-500">${escapeHtml(account.eposta || '')}</span><button type="button" class="toolbar-button h-8 ml-auto" data-open-main-account="${escapeHtml(account.ID)}">Cariyi Aç</button><button type="button" class="toolbar-button h-8" data-open-main-products="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Ürünleri Aç</button><button type="button" class="toolbar-button h-8" data-open-author-sales="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Tüm Satışlar</button></div>`).join('');
+      const products = (data.main_links?.products || []).map(product => `<tr class="border-t border-slate-200"><td class="p-2">#${escapeHtml(product.ID)}</td><td class="p-2">${escapeHtml(product.isbn || '')}</td><td class="p-2 font-medium">${escapeHtml(product.kitapadi || '')}</td><td class="p-2 text-right">${Number(product.metrics?.['Satış'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['İade'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['Yazara Verilen'] || 0).toLocaleString('tr-TR')}</td><td class="p-2"><button type="button" class="toolbar-button h-8" data-open-product-sales="${escapeHtml(product.ID)}" data-product-name="${escapeHtml(product.kitapadi || '')}">Satış Geçmişi</button></td></tr>`).join('');
+      const linksPanel = `<section class="rounded border border-blue-300 bg-white"><div class="space-y-2 p-2">${accounts || '<div class="rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">Bu e-posta ile eşleşen cari kart bulunamadı.</div>'}</div><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-100"><th class="p-2 text-left">ID</th><th class="p-2 text-left">ISBN</th><th class="p-2 text-left">Ürün</th><th class="p-2 text-right">Satış</th><th class="p-2 text-right">İade</th><th class="p-2 text-right">Yazara verilen</th><th></th></tr></thead><tbody>${products || '<tr><td colspan="7" class="p-5 text-center text-slate-500">Bağlı ürün bulunamadı.</td></tr>'}</tbody></table></div></section>`;
+      const showFinancialSummary = [data.summary?.cost, data.summary?.payment, data.summary?.balance].some(value => Number(value || 0) !== 0);
+      const financialSummary = showFinancialSummary ? `<div class="flex items-center gap-5 overflow-x-auto whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"><span class="text-slate-600">Üretim maliyeti <strong class="ml-1 text-slate-900">${formatMoney(data.summary.cost,data.currency)}</strong></span><span class="text-emerald-700">Alınan ödeme <strong class="ml-1">${formatMoney(data.summary.payment,data.currency)}</strong></span><span class="text-amber-800">Kalan <strong class="ml-1">${formatMoney(data.summary.balance,data.currency)}</strong></span></div>` : '';
+      const transactions = win.state.id ? `<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">${productionTransactionTable('expense', data.expenses || [], win.state.id, data.currency)}${productionTransactionTable('payment', data.payments || [], win.state.id, data.currency)}</div>` : '';
+      win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button bg-blue-600 text-white" data-save-project>✓ Kaydet</button>${win.state.id ? '<button class="toolbar-button" data-refresh>↻ Yenile</button>' : ''}<span class="ml-auto text-xs text-slate-500">CUP veritabanı: ayrı bağlantı</span></div><div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">${win.state.id ? `${financialSummary}${linksPanel}` : ''}<form data-production-form class="space-y-3">${groups}</form>${transactions}</div></div>`;
+      const form = win.body.querySelector('[data-production-form]');
+      form.addEventListener('input', () => win.dirty = true);
+      win.body.querySelector('[data-save-project]').onclick = async () => {
+        const recordPayload = Object.fromEntries(new FormData(form).entries());
+        form.querySelectorAll('input[type="checkbox"][data-production-field]').forEach(input => { recordPayload[input.name] = input.checked ? 1 : 0; });
+        if (win.state.id) recordPayload.ID = win.state.id;
+        try {
+          const saved = await productionApi('?action=save', {method:'POST',body:JSON.stringify({record:recordPayload})});
+          win.dirty = false; toast(`Üretim kaydı #${saved.id} kaydedildi.`);
+          [...windows.values()].filter(item => item.kind === 'production_list').forEach(loadProductionList);
+          if (!win.state.id) { closeWindow(win); openProductionProject(saved.id); } else loadProductionProject(win);
+        } catch (error) { toast(error.message,'error'); }
+      };
+      if (win.body.querySelector('[data-refresh]')) win.body.querySelector('[data-refresh]').onclick = () => loadProductionProject(win);
+      win.body.querySelectorAll('[data-save-transaction]').forEach(button => button.onclick = async () => {
+        const row = button.closest('[data-production-transaction]');
+        try {
+          await productionApi('?action=save_transaction',{method:'POST',body:JSON.stringify({type:row.dataset.type,record:{ID:Number(row.dataset.id),yazarID:win.state.id,tarih:row.querySelector('[data-date]').value,aciklama:row.querySelector('[data-description]').value,tutar:row.querySelector('[data-amount]').value}})});
+          toast('Üretim hareketi kaydedildi.'); loadProductionProject(win);
+        } catch (error) { toast(error.message,'error'); }
+      });
+      win.body.querySelectorAll('[data-open-main-account]').forEach(button => button.onclick = () => openEditor('adresdefteri','Cari Kartlar',Number(button.dataset.openMainAccount),null));
+      win.body.querySelectorAll('[data-open-main-products]').forEach(button => button.onclick = () => openTable('asp_urun','Ürünler / Kitaplar',{column:'CinYazarID',value:Number(button.dataset.openMainProducts)},{title:button.dataset.accountName,lookup:{table:'adresdefteri',label:'FirmaAd',id:Number(button.dataset.openMainProducts)}}));
+      win.body.querySelectorAll('[data-open-author-sales]').forEach(button => button.onclick = () => openReport('author_sales',Number(button.dataset.openAuthorSales),'Satış Geçmişi',{title:button.dataset.accountName,lookup:{table:'adresdefteri',label:'FirmaAd',id:Number(button.dataset.openAuthorSales)}}));
+      win.body.querySelectorAll('[data-open-product-sales]').forEach(button => button.onclick = () => openReport('product_sales',Number(button.dataset.openProductSales),'Satış Geçmişi',{title:button.dataset.productName,lookup:{table:'asp_urun',label:'kitapadi',id:Number(button.dataset.openProductSales)}}));
+    } catch (error) { win.body.innerHTML = `<div class="p-8 text-center text-red-700">${escapeHtml(error.message)}</div>`; }
+  }
+
   async function resolveStoredRelationshipContext(titleLookup) {
     if (!titleLookup?.table || !titleLookup?.label || !titleLookup?.id) return null;
     try {
@@ -927,6 +1075,10 @@
           win = await openEditor(s.table, s.label, s.id || null, s.parentKey ? windows.get(s.parentKey) || null : null, {key: descriptor.key, parentKey: s.parentKey || null});
         } else if (descriptor.kind === 'settings' && s.section === 'currency') {
           win = await openCurrencySettings(s);
+        } else if (descriptor.kind === 'production_list') {
+          win = await openProductionList(s.view || 'all', s.label || 'Üretim Projeleri', s);
+        } else if (descriptor.kind === 'production_project') {
+          win = await openProductionProject(s.id || null, s);
         }
         if (win) applyStoredWindowLayout(win, descriptor);
       }
@@ -939,6 +1091,9 @@
   document.querySelectorAll('[data-open-table]').forEach(button => button.onclick = () => openTable(button.dataset.openTable, button.dataset.label));
   document.querySelectorAll('[data-open-settings]').forEach(button => button.onclick = event => { event.stopPropagation(); if (button.dataset.openSettings === 'currency') openCurrencySettings(); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-business-report]').forEach(button => button.onclick = event => { event.stopPropagation(); openBusinessReport(button.dataset.openBusinessReport, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
+  document.querySelectorAll('[data-open-production-list]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList(button.dataset.openProductionList, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
+  document.querySelectorAll('[data-open-production-new]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionProject(null); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
+  document.querySelectorAll('[data-open-production-balances]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList('balances', 'Üretim Bakiyeleri'); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('nav > .group > button').forEach(trigger => {
     trigger.addEventListener('click', event => {
       event.stopPropagation();

@@ -26,10 +26,19 @@ return [
     'ureticiler' => ['label' => 'Üreticiler / Yayınevleri', 'group' => 'Stok', 'list' => ['ID','uretici','telefon','adres'], 'search' => ['uretici','telefon'], 'name' => 'uretici'],
     'urungruplari' => ['label' => 'Ürün Grupları', 'group' => 'Stok', 'list' => ['ID','grup'], 'name' => 'grup'],
 
-    'faturabaslik' => ['label' => 'Faturalar', 'group' => 'Satış / Alış', 'list' => ['ID','faturaNo','FaturaTarih','MusteriID','AliciAd','FaturaTuru','UrunSayisi','Toplam','odemeYapildi'], 'search' => ['faturaNo','AliciAd','AliciVergiNo','AliciTelefon'], 'relations' => ['MusteriID'=>['adresdefteri','FirmaAd'],'FaturaTuru'=>['faturaturleri','FaturaTuru'],'odemeKasaID'=>['kasa','BelgeNo'],'odemeBankaID'=>['banka_kasa','aciklama']], 'transactional' => true, 'editor_hidden' => ['depoIslem'], 'money' => ['OnToplam','Indirim','KDV','Toplam']],
+    'faturabaslik' => ['label' => 'Faturalar', 'group' => 'Satış / Alış', 'list' => ['ID','faturaNo','FaturaTarih','MusteriID','AliciAd','FaturaTuru','UrunSayisi','Toplam','odemeYapildi'], 'search' => ['faturaNo','AliciAd','AliciVergiNo','AliciTelefon'], 'relations' => ['MusteriID'=>['adresdefteri','FirmaAd'],'FaturaTuru'=>['faturaturleri','FaturaTuru'],'odemeKasaID'=>['kasa','Aciklama'],'odemeBankaID'=>['banka_kasa','aciklama']], 'transactional' => true, 'editor_hidden' => ['depoIslem'], 'money' => ['OnToplam','Indirim','KDV','Toplam']],
     'faturaturleri' => ['label' => 'Fatura Türleri', 'group' => 'Satış / Alış', 'list' => ['ID','FaturaTuru','islemYon'], 'name' => 'FaturaTuru'],
 
-    'kasa' => ['label' => 'Kasa Hareketleri', 'group' => 'Finans', 'list' => ['ID','islemTarihi','MusteriID','Islem','Miktar','KategoriID','BelgeNo'], 'search' => ['Aciklama','BelgeNo','urunAdi'], 'relations' => ['MusteriID'=>['adresdefteri','FirmaAd'],'KategoriID'=>['kategoriler','kategori'],'FaturaID'=>['faturabaslik','faturaNo'],'ceksenetID'=>['cek_senet_kasa','cekNo'],'UrunID'=>['asp_urun','kitapadi']], 'transactional' => true, 'editor_hidden' => ['KurID'], 'money' => ['Miktar']],
+    'kasa' => [
+        'label' => 'Kasa Hareketleri', 'group' => 'Finans',
+        'list' => ['ID','islemTarihi','MusteriID','Islem','Miktar','KategoriID','Aciklama'],
+        'search' => ['Aciklama','urunAdi'],
+        'relations' => ['MusteriID'=>['adresdefteri','FirmaAd'],'KategoriID'=>['kategoriler','kategori'],'FaturaID'=>['faturabaslik','faturaNo'],'UrunID'=>['asp_urun','kitapadi']],
+        'value_labels' => ['Islem'=>[1=>'Gelir',2=>'Gider']],
+        'transactional' => true,
+        'editor_hidden' => ['KurID','CaridenGizle','BelgeNo','ceksenetID'],
+        'money' => ['Miktar'],
+    ],
     'banka_kasa' => ['label' => 'Banka Hareketleri', 'group' => 'Finans', 'list' => ['ID','tarih','hesapID','musteriID','para','yatirildi','cekildi','kategoriID','faturaID'], 'search' => ['aciklama'], 'relations' => ['hesapID'=>['hesaplar','banka_hesapad'],'musteriID'=>['adresdefteri','FirmaAd'],'transferBankaID'=>['hesaplar','banka_hesapad'],'kategoriID'=>['kategoriler','kategori'],'faturaID'=>['faturabaslik','faturaNo'],'cekID'=>['cek_senet_kasa','cekNo']], 'transactional' => true, 'editor_hidden' => ['kurID'], 'money' => ['para']],
     'hesaplar' => ['label' => 'Banka Hesapları', 'group' => 'Finans', 'list' => ['ID','banka_hesapad','hesapturu','hesapno','subeAd','bakiye'], 'name' => 'banka_hesapad', 'editor_hidden' => ['kurID'], 'money' => ['bakiye']],
     'kategoriler' => ['label' => 'Finans Kategorileri', 'group' => 'Finans', 'list' => ['ID','kategori'], 'name' => 'kategori'],

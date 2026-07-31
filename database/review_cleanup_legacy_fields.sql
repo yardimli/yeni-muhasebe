@@ -64,6 +64,10 @@ SELECT 'kasa.gelirID', COUNT(*), SUM(gelirID <> 0) FROM kasa;
 --     DROP COLUMN kasaID,
 --     DROP COLUMN firmaID;
 -- ALTER TABLE kasa DROP COLUMN BankaIslemID;
+-- ALTER TABLE kasa
+--     DROP COLUMN CaridenGizle,
+--     DROP COLUMN BelgeNo,
+--     DROP COLUMN ceksenetID;
 
 -- ============================================================================
 -- 3. CANDIDATES THAT SHOULD BE RETAINED WITHOUT FURTHER BUSINESS CONFIRMATION

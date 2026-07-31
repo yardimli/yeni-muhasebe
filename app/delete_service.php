@@ -199,7 +199,7 @@ function cascade_address_groups(int $id): array
     $groups[] = cascade_group('bank_customer', 'Cari banka hareketleri', 'banka_kasa', '`musteriID` = ?', [$id]);
     if (cleanup_table_exists('odemefatura')) $groups[] = cascade_in_group('payment_links_customer', 'Cari ödemelerinin fatura bağlantıları (eski tablo)', 'odemefatura', 'odemeID', $payments);
     if (cleanup_table_exists('odemeler')) $groups[] = cascade_in_group('payments_customer', 'Cari ödemeleri (eski tablo)', 'odemeler', 'ID', $payments);
-    $groups[] = cascade_group('cash_checks', 'Cari çek/senet kasa hareketleri', 'kasa', '`ceksenetID` IN (' . ($checks === [] ? 'NULL' : cleanup_placeholders($checks)) . ')', $checks);
+    $groups[] = cascade_in_group('cash_checks', 'Cari çek/senet kasa hareketleri', 'kasa', 'ceksenetID', $checks);
     $groups[] = cascade_group('bank_checks', 'Cari çek/senet banka hareketleri', 'banka_kasa', '`cekID` IN (' . ($checks === [] ? 'NULL' : cleanup_placeholders($checks)) . ')', $checks);
     $groups[] = cascade_in_group('checks_customer', 'Cari çek / senet kayıtları', 'cek_senet_kasa', 'ID', $checks);
     $groups[] = cascade_group('corrections_customer', 'Cari düzeltme kayıtları', 'cari_duzeltme_kayitlari', '`musteriID` = ?', [$id]);

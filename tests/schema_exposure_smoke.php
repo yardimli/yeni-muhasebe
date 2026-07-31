@@ -22,6 +22,15 @@ foreach (['Telefon1','Telefon2','Telefon3','GSMTel1','GSMTel2','Faks1','Faks2','
 }
 if (in_array('Bakiye', $schema['adresdefteri']['list'] ?? [], true)) throw new RuntimeException('Cari Bakiye is still listed.');
 
+$cash = $schema['kasa'];
+foreach (['CaridenGizle','BelgeNo','ceksenetID'] as $field) {
+    if (in_array($field, $cash['list'] ?? [], true)) throw new RuntimeException("Removed cash field is still listed: $field");
+    if (in_array($field, $cash['search'] ?? [], true)) throw new RuntimeException("Removed cash field is still searched: $field");
+    if (isset($cash['relations'][$field])) throw new RuntimeException("Removed cash relation is still exposed: $field");
+    if (!in_array($field, $cash['editor_hidden'] ?? [], true)) throw new RuntimeException("Removed cash field is still editable: $field");
+}
+if (($cash['value_labels']['Islem'] ?? []) !== [1=>'Gelir',2=>'Gider']) throw new RuntimeException('Cash transaction direction labels are incorrect.');
+
 $product = $schema['asp_urun'];
 foreach (['yayinevitxt', 'yazarlistetxt'] as $field) {
     if (in_array($field, $product['list'] ?? [], true)) throw new RuntimeException("Product legacy text is still listed: $field");
