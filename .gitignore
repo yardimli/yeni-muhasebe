@@ -1,0 +1,10 @@
+.env
+cinius-satis-app.php
+node_modules/
+storage/users.json
+storage/audit.log
+/webcin
+package-lock.json
+php_errors.log
+public/dev-server.err.log
+public/dev-server.out.log
