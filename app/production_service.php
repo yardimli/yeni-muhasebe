@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once APP_ROOT . '/app/product_metrics.php';
+require_once APP_ROOT . '/app/production_schema_cleanup.php';
 
 function production_field_groups(): array
 {
@@ -23,45 +24,28 @@ function production_field_groups(): array
         ],
         'Proje takibi' => [
             'Sorumlu'=>['label'=>'Sorumlu','type'=>'text'],
-            'OkumaDurum'=>['label'=>'Okuma durumu','type'=>'select','options'=>['Başlanmadı','Devam Ediyor','Tamamlandı','Okunmayacak']],
-            'DizgiDurum'=>['label'=>'Dizgi durumu','type'=>'select','options'=>['Başlanmadı','Devam Ediyor','Onay Bekliyor','Tamamlandı','Yapılmayacak']],
-            'KapakDurum'=>['label'=>'Kapak durumu','type'=>'select','options'=>['Başlanmadı','Devam Ediyor','Onay Bekliyor','Tamamlandı','Yapılmayacak']],
-            'AyracDurum'=>['label'=>'Ayraç durumu','type'=>'text'],
-            'PosterDurum'=>['label'=>'Poster durumu','type'=>'text'],
-            'KartvizitDurum'=>['label'=>'Kartvizit durumu','type'=>'text'],
-            'WebDurum'=>['label'=>'Web durumu','type'=>'text'],
-            'DizgiSorumlu'=>['label'=>'Dizgi sorumlusu','type'=>'text'],
-            'KapakSorumlu'=>['label'=>'Kapak sorumlusu','type'=>'text'],
             'BaskiyaVerilisTarihi'=>['label'=>'Baskıya veriliş','type'=>'date'],
             'BaskidanGelisTarihi'=>['label'=>'Baskıdan geliş','type'=>'date'],
             'BaskidanGeldi'=>['label'=>'Baskıdan geldi','type'=>'boolean'],
-            'passif'=>['label'=>'Pasif kayıt','type'=>'boolean'],
         ],
         'Yazar bilgileri' => [
             'YazarinAdresi'=>['label'=>'Adres','type'=>'textarea'],
             'YazarinTelefonNumarasi'=>['label'=>'Telefon','type'=>'text'],
             'YazarinGSM'=>['label'=>'GSM','type'=>'text'],
             'YazarinFaksNumarasi'=>['label'=>'Doğum tarihi / eski faks alanı','type'=>'text'],
-            'KimlikNo'=>['label'=>'Kimlik no','type'=>'text'],
         ],
         'Baskı özellikleri' => [
-            'KapakGofreli'=>['label'=>'Kapak gofreli','type'=>'boolean'],
             'LokalLak'=>['label'=>'Lokal lak','type'=>'boolean'],
-            'MatSelofon'=>['label'=>'Mat selefon','type'=>'boolean'],
             'Ayrac'=>['label'=>'Ayraç','type'=>'boolean'],
             'Kuse'=>['label'=>'Kuşe','type'=>'boolean'],
             'BirinciHamurKagit'=>['label'=>'Birinci hamur kağıt','type'=>'boolean'],
             'SivamaCilt'=>['label'=>'Sıvama cilt','type'=>'boolean'],
             'Poster'=>['label'=>'Poster','type'=>'boolean'],
             'Yaldiz'=>['label'=>'Yaldız','type'=>'boolean'],
-            'yaldizTxt'=>['label'=>'Yaldız açıklaması','type'=>'text'],
             'RenkliForma'=>['label'=>'Renkli forma','type'=>'boolean'],
             'RenkliFormaMetin'=>['label'=>'Renkli forma açıklaması','type'=>'text'],
         ],
         'Ödeme tercihleri' => [
-            'OdemeKrediKartiPesin'=>['label'=>'Kredi kartı peşin','type'=>'boolean'],
-            'OdemeKrediKarti4Taksit'=>['label'=>'Kredi kartı 4 taksit','type'=>'boolean'],
-            'OdemeHavale'=>['label'=>'Havale','type'=>'boolean'],
             'OdemePesin'=>['label'=>'Peşin','type'=>'boolean'],
             'OdemeDiger'=>['label'=>'Diğer ödeme','type'=>'text'],
             'OdemeTamamlandi'=>['label'=>'Ödeme tamamlandı','type'=>'boolean'],
@@ -69,9 +53,6 @@ function production_field_groups(): array
         'Notlar ve metinler' => [
             'NOTLAR'=>['label'=>'Notlar','type'=>'textarea'],
             'KapakYazisi'=>['label'=>'Kapak yazısı','type'=>'textarea'],
-            'Kanca'=>['label'=>'Kanca','type'=>'textarea'],
-            'OkumaNotu'=>['label'=>'Hesap / okuma notu','type'=>'textarea'],
-            'Yasamoykusu'=>['label'=>'Yaşam öyküsü','type'=>'textarea'],
         ],
     ];
 }
@@ -91,9 +72,10 @@ function production_columns(): array
 function production_available_field_groups(): array
 {
     $columns = production_columns();
+    $removed = array_flip(production_unused_field_names());
     $groups = [];
     foreach (production_field_groups() as $group => $fields) {
-        $groups[$group] = array_intersect_key($fields, $columns);
+        $groups[$group] = array_diff_key(array_intersect_key($fields, $columns),$removed);
     }
     return array_filter($groups);
 }
@@ -103,10 +85,15 @@ function production_email(string $email): string
     return mb_strtolower(trim($email), 'UTF-8');
 }
 
+function production_email_is_placeholder(string $email): bool
+{
+    return production_email($email) === 'admin@ciniusyayinlari.com';
+}
+
 function production_main_links(string $email): array
 {
     $email = production_email($email);
-    if ($email === '') return ['accounts'=>[], 'products'=>[]];
+    if ($email === '' || production_email_is_placeholder($email)) return ['accounts'=>[], 'products'=>[]];
     $statement = db()->prepare("SELECT `ID`,`FirmaAd`,`Ad`,`Soyad`,`eposta` FROM `adresdefteri` WHERE LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci = ? ORDER BY `ID`");
     $statement->execute([$email]);
     $accounts = $statement->fetchAll();
@@ -132,17 +119,21 @@ function production_main_links(string $email): array
 
 function production_enrich_link_counts(array &$rows): void
 {
-    $emails = array_values(array_unique(array_filter(array_map(fn(array $row):string=>production_email((string)($row['YazarinEpostasi']??'')), $rows))));
+    $emails = array_values(array_unique(array_filter(
+        array_map(fn(array $row):string=>production_email((string)($row['YazarinEpostasi']??'')), $rows),
+        fn(string $email):bool=>$email !== '' && !production_email_is_placeholder($email)
+    )));
     $accountsByEmail = [];
     $productCounts = [];
     if ($emails !== []) {
         $in = implode(',', array_fill(0,count($emails),'?'));
-        $statement = db()->prepare("SELECT `ID`,LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci normalized_email FROM `adresdefteri` WHERE LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci IN ($in)");
+        $statement = db()->prepare("SELECT `ID`,`FirmaAd`,`Ad`,`Soyad`,LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci normalized_email FROM `adresdefteri` WHERE LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci IN ($in)");
         $statement->execute($emails);
         $allAccountIds = [];
         foreach ($statement->fetchAll() as $account) {
             $email = (string)$account['normalized_email'];
-            $accountsByEmail[$email][] = (int)$account['ID'];
+            $name = trim((string)($account['FirmaAd'] ?: trim((string)($account['Ad'] ?? '') . ' ' . (string)($account['Soyad'] ?? ''))));
+            $accountsByEmail[$email][] = ['ID'=>(int)$account['ID'], 'name'=>$name];
             $allAccountIds[] = (int)$account['ID'];
         }
         if ($allAccountIds !== []) {
@@ -153,7 +144,9 @@ function production_enrich_link_counts(array &$rows): void
         }
     }
     foreach ($rows as &$row) {
-        $accountIds = $accountsByEmail[production_email((string)($row['YazarinEpostasi']??''))] ?? [];
+        $accounts = $accountsByEmail[production_email((string)($row['YazarinEpostasi']??''))] ?? [];
+        $accountIds = array_map(static fn(array $account):int=>(int)$account['ID'], $accounts);
+        $row['__accounts'] = $accounts;
         $row['CariBaglantisi'] = count($accountIds);
         $row['UrunBaglantisi'] = array_sum(array_map(fn(int $id):int=>$productCounts[$id]??0,$accountIds));
     }
@@ -163,24 +156,159 @@ function production_enrich_link_counts(array &$rows): void
 function production_view_condition(string $view): string
 {
     return match ($view) {
-        'reading' => "COALESCE(p.`passif`,0)=0 AND COALESCE(p.`OkumaDurum`,'') NOT IN ('Tamamlandı','Okunmayacak')",
-        'layout' => "COALESCE(p.`passif`,0)=0 AND p.`OkumaDurum`='Tamamlandı' AND COALESCE(p.`DizgiDurum`,'') NOT IN ('Tamamlandı','Yapılmayacak')",
-        'cover' => "COALESCE(p.`passif`,0)=0 AND COALESCE(p.`KapakDurum`,'') NOT IN ('Tamamlandı','Yapılmayacak')",
-        'printing' => "COALESCE(p.`passif`,0)=0 AND p.`BaskiyaVerilisTarihi` IS NOT NULL AND COALESCE(p.`BaskidanGeldi`,0)=0",
-        'completed' => "COALESCE(p.`BaskidanGeldi`,0)<>0",
-        'balances' => "COALESCE(p.`passif`,0)=0 AND COALESCE(p.`OdemeTamamlandi`,0)=0
+        'balances' => "COALESCE(p.`OdemeTamamlandi`,0)=0
             AND ((SELECT COALESCE(SUM(m.`tutar`),0) FROM `masraflar` m WHERE m.`yazarID`=p.`ID`)
                - (SELECT COALESCE(SUM(o.`tutar`),0) FROM `odemeler` o WHERE o.`yazarID`=p.`ID`)) > 30",
-        'active' => "COALESCE(p.`passif`,0)=0",
+        'active' => '1=1',
         default => '1=1',
     };
+}
+
+function production_report_range(string $preset, ?string $customStart, ?string $customEnd): array
+{
+    $today = new DateTimeImmutable('today');
+    $preset = in_array($preset, ['current_month','last_month','last_3_months','this_year','last_year','custom'], true) ? $preset : 'this_year';
+    [$start, $end] = match ($preset) {
+        'current_month' => [$today->modify('first day of this month'), $today],
+        'last_month' => [$today->modify('first day of last month'), $today->modify('last day of last month')],
+        'last_3_months' => [$today->modify('first day of this month')->modify('-2 months'), $today],
+        'last_year' => [$today->modify('first day of january')->modify('-1 year'), $today->modify('last day of december')->modify('-1 year')],
+        'custom' => [null, null],
+        default => [$today->modify('first day of january'), $today],
+    };
+    if ($preset === 'custom') {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$customStart) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$customEnd)) {
+            throw new InvalidArgumentException('Başlangıç ve bitiş tarihlerini seçin.');
+        }
+        $start = new DateTimeImmutable((string)$customStart);
+        $end = new DateTimeImmutable((string)$customEnd);
+        if ($start > $end) throw new InvalidArgumentException('Başlangıç tarihi bitiş tarihinden sonra olamaz.');
+    }
+    return ['preset'=>$preset, 'start'=>$start->format('Y-m-d'), 'end'=>$end->format('Y-m-d')];
+}
+
+function production_analytics(string $grouping, ?string $rangeStart = null, ?string $rangeEnd = null): array
+{
+    $grouping = $grouping === 'yearly' ? 'yearly' : 'monthly';
+    $today = new DateTimeImmutable('today');
+    $start = $rangeStart ?: ($grouping === 'yearly'
+        ? $today->modify('first day of january')->modify('-9 years')->format('Y-m-d')
+        : $today->modify('first day of this month')->modify('-23 months')->format('Y-m-d'));
+    $end = $rangeEnd ?: $today->format('Y-m-d');
+    $statement = cup_db()->prepare("SELECT `ID`,`SozlesmeTarihi`,`YazarinEpostasi`,`Paket` FROM `cinius_uretim`
+        WHERE `SozlesmeTarihi` IS NOT NULL AND `SozlesmeTarihi`<DATE_ADD(?,INTERVAL 1 DAY)
+        ORDER BY `SozlesmeTarihi`,`ID`");
+    $statement->execute([$end]);
+    $seenAuthors = [];
+    $trendBuckets = [];
+    $packageBuckets = [];
+    foreach ($statement->fetchAll() as $project) {
+        $date = substr((string)$project['SozlesmeTarihi'],0,10);
+        $email = production_email((string)$project['YazarinEpostasi']);
+        $validEmail = $email !== '' && $email !== 'admin@ciniusyayinlari.com';
+        $wasSeen = $validEmail && isset($seenAuthors[$email]);
+        if ($date >= $start) {
+            $period = $grouping === 'yearly' ? substr($date,0,4) : substr($date,0,7);
+            if ($validEmail) {
+                $trendBuckets[$period] ??= ['projects'=>0,'authors'=>[],'returning'=>[]];
+                $trendBuckets[$period]['projects']++;
+                $trendBuckets[$period]['authors'][$email] = true;
+                if ($wasSeen) $trendBuckets[$period]['returning'][$email] = true;
+            }
+            $package = trim((string)$project['Paket']) ?: 'Belirtilmemiş';
+            $packageKey = $period . "\0" . $package;
+            $packageBuckets[$packageKey] ??= ['period'=>$period,'package'=>$package,'projects'=>0,'authors'=>[]];
+            $packageBuckets[$packageKey]['projects']++;
+            if ($validEmail) $packageBuckets[$packageKey]['authors'][$email] = true;
+        }
+        if ($validEmail) $seenAuthors[$email] = true;
+    }
+    ksort($trendBuckets);
+    ksort($packageBuckets);
+    $trend = [];
+    foreach ($trendBuckets as $period => $bucket) {
+        $authors = count($bucket['authors']);
+        $returning = count($bucket['returning']);
+        $trend[] = ['Donem'=>$period,'Proje'=>$bucket['projects'],'Yazar'=>$authors,'GeriDonenYazar'=>$returning,'GeriDonusOrani'=>$authors > 0 ? round(100*$returning/$authors,1) : 0];
+    }
+    $packages = array_map(fn(array $bucket): array => ['Donem'=>$bucket['period'],'Paket'=>$bucket['package'],'Proje'=>$bucket['projects'],'Yazar'=>count($bucket['authors'])], array_values($packageBuckets));
+
+    return [
+        'grouping'=>$grouping,'start'=>$start,'end'=>$end,
+        'returning_authors'=>$trend,
+        'packages'=>$packages,
+    ];
+}
+
+function production_report_catalog(): array
+{
+    return [
+        'returning_authors' => 'Geri Dönen Yazarlar',
+        'package_distribution' => 'Paket Dağılımı',
+    ];
+}
+
+function production_report_run(string $report, string $grouping, array $range, int $page, int $perPage, string $sort, string $direction): array
+{
+    $catalog = production_report_catalog();
+    if (!isset($catalog[$report])) throw new InvalidArgumentException('Bilinmeyen üretim raporu.');
+    $grouping = $grouping === 'yearly' ? 'yearly' : 'monthly';
+    $analytics = production_analytics($grouping, (string)$range['start'], (string)$range['end']);
+    if ($report === 'returning_authors') {
+        $sourceRows = $analytics['returning_authors'];
+        $mapping = ['Dönem'=>'Donem','Proje'=>'Proje','Yazar'=>'Yazar','Geri Dönen Yazar'=>'GeriDonenYazar','Geri Dönüş Oranı %'=>'GeriDonusOrani'];
+        $chartSeries = ['Proje','Yazar','Geri Dönen Yazar'];
+    } else {
+        $sourceRows = $analytics['packages'];
+        $mapping = ['Dönem'=>'Donem','Paket'=>'Paket','Proje'=>'Proje','Yazar'=>'Yazar'];
+        $chartSeries = ['Proje','Yazar'];
+    }
+    $columns = array_keys($mapping);
+    if (!isset($mapping[$sort])) $sort = 'Dönem';
+    $direction = strtolower($direction) === 'desc' ? 'desc' : 'asc';
+    $sortKey = $mapping[$sort];
+    usort($sourceRows, static function (array $left, array $right) use ($sortKey, $direction): int {
+        $a = $left[$sortKey] ?? null;
+        $b = $right[$sortKey] ?? null;
+        $comparison = is_numeric($a) && is_numeric($b) ? ((float)$a <=> (float)$b) : strnatcasecmp((string)$a, (string)$b);
+        if ($comparison === 0) $comparison = strnatcasecmp((string)($left['Donem'] ?? ''), (string)($right['Donem'] ?? ''));
+        return $direction === 'desc' ? -$comparison : $comparison;
+    });
+    $displayRows = array_map(static function (array $row) use ($mapping): array {
+        $display = [];
+        foreach ($mapping as $label => $key) $display[$label] = $row[$key] ?? null;
+        return $display;
+    }, $sourceRows);
+    $page = max(1, $page);
+    $perPage = in_array($perPage, [50,100,250,500,1000], true) ? $perPage : 250;
+    $total = count($displayRows);
+    $pages = max(1, (int)ceil($total / $perPage));
+    $page = min($page, $pages);
+    $chartRows = array_slice($displayRows, 0, 40);
+    $numericColumns = [];
+    $totals = [];
+    foreach ($columns as $column) {
+        $values = array_column($displayRows,$column);
+        if ($values !== [] && count(array_filter($values,'is_numeric')) === count($values)) {
+            $numericColumns[] = $column;
+            $totals[$column] = array_sum(array_map('floatval',$values));
+        }
+    }
+    return [
+        'title'=>$catalog[$report], 'report'=>$report, 'grouping'=>$grouping, 'range'=>$range,
+        'columns'=>$columns, 'rows'=>array_slice($displayRows, ($page - 1) * $perPage, $perPage),
+        'chart_rows'=>$chartRows, 'chart_series'=>$chartSeries, 'money_columns'=>[],
+        'totals'=>$totals,'numeric_columns'=>$numericColumns,
+        'page'=>$page, 'per_page'=>$perPage, 'total'=>$total, 'pages'=>$pages,
+        'sort'=>$sort, 'dir'=>$direction,
+    ];
 }
 
 function production_list(int $page, int $perPage, string $query, string $view, string $sort, string $dir): array
 {
     $page = max(1, $page);
     $perPage = in_array($perPage, [50,100,250,500,1000], true) ? $perPage : 250;
-    $sortColumns = ['ID','KitabinAdi','YazarinAdi','YazarinEpostasi','Paket','SozlesmeTarihi','OkumaDurum','DizgiDurum','KapakDurum','BaskiyaVerilisTarihi'];
+    $sortColumns = ['ID','KitabinAdi','YazarinAdi','YazarinEpostasi','Paket','SozlesmeTarihi','BaskiyaVerilisTarihi'];
     if (!in_array($sort, $sortColumns, true)) $sort = 'ID';
     $direction = strtolower($dir) === 'asc' ? 'ASC' : 'DESC';
     $where = [production_view_condition($view)];
@@ -194,7 +322,7 @@ function production_list(int $page, int $perPage, string $query, string $view, s
     $count->execute($params);
     $total = (int) $count->fetchColumn();
     $offset = ($page - 1) * $perPage;
-    $sql = "SELECT p.`ID`,p.`KitabinAdi`,p.`YazarinAdi`,p.`YazarinEpostasi`,p.`Paket`,p.`SozlesmeTarihi`,p.`OkumaDurum`,p.`DizgiDurum`,p.`KapakDurum`,p.`BaskiyaVerilisTarihi`,p.`BaskidanGeldi`,
+    $sql = "SELECT p.`ID`,p.`KitabinAdi`,p.`YazarinAdi`,p.`YazarinEpostasi`,p.`Paket`,p.`SozlesmeTarihi`,p.`BaskiyaVerilisTarihi`,p.`BaskidanGeldi`,
         COALESCE(costs.total,0) AS UretimMaliyeti, COALESCE(payments.total,0) AS AlinanOdeme,
         COALESCE(costs.total,0)-COALESCE(payments.total,0) AS Kalan
         FROM `cinius_uretim` p
@@ -205,9 +333,13 @@ function production_list(int $page, int $perPage, string $query, string $view, s
     $statement->execute($params);
     $rows = $statement->fetchAll();
     production_enrich_link_counts($rows);
+    foreach ($rows as &$row) {
+        if (production_email_is_placeholder((string)($row['YazarinEpostasi'] ?? ''))) $row['YazarinEpostasi'] = 'Belirtilmemiş';
+    }
+    unset($row);
     return [
         'rows'=>$rows,
-        'columns'=>['ID','KitabinAdi','YazarinAdi','YazarinEpostasi','Paket','SozlesmeTarihi','OkumaDurum','DizgiDurum','KapakDurum','UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi','UrunBaglantisi'],
+        'columns'=>['ID','KitabinAdi','YazarinAdi','YazarinEpostasi','Paket','SozlesmeTarihi','UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi','UrunBaglantisi'],
         'sortable_columns'=>$sortColumns,
         'money_columns'=>['UretimMaliyeti','AlinanOdeme','Kalan'],
         'currency'=>setting_get('default_currency','TL'),

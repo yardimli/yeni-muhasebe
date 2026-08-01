@@ -8,6 +8,14 @@ $range = business_report_range('this_year', null, null);
 $catalog = business_report_flat_catalog();
 $cashflowSql = business_report_definition('combined_cashflow', 'monthly', $range['start'], $range['end'])['sql'];
 $overviewSql = business_report_definition('executive_overview', 'monthly', $range['start'], $range['end'])['sql'];
+$overview = business_report_definition('executive_overview', 'monthly', $range['start'], $range['end']);
+foreach (['GelenFatura'=>'Gelen Fatura Toplamı','GidenFatura'=>'Giden Fatura Toplamı'] as $key=>$label) {
+    if (($overview['columns'][$key] ?? null) !== $label) throw new RuntimeException("Executive overview is missing $label.");
+    if (!in_array($key, $overview['money'], true)) throw new RuntimeException("$label is not formatted as money.");
+}
+foreach (['fb.FaturaTuru=3','fb.FaturaTuru=4','GelenFatura','GidenFatura'] as $contract) {
+    if (!str_contains($overviewSql, $contract)) throw new RuntimeException("Executive invoice-total SQL is missing: $contract");
+}
 foreach ([$cashflowSql,$overviewSql] as $sql) {
     if (!str_contains($sql,'k.Islem=1') || !str_contains($sql,'k.Islem=2')) {
         throw new RuntimeException('Cash report direction must use Islem=1 for income and Islem=2 for expense.');

@@ -49,31 +49,46 @@ function business_report_definition(string $id, string $grouping, string $start,
     $dateParams = fn (int $times = 1): array => array_merge(...array_fill(0, $times, [$start, $end]));
     $eligibleSale = business_report_author_copy_condition('fb', 'u');
     $lineTotal = business_report_line_total('fd');
-    $money = ['NetTutar','BrutTutar','Iade','Indirim','KDV','Toplam','Tahsilat','Odeme','NetNakit','Ortalama','Bakiye','Degisim','DonemOrtalamasi','Sapma'];
+    $money = ['NetTutar','BrutTutar','Iade','Indirim','KDV','Toplam','Tahsilat','Odeme','NetNakit','Ortalama','Bakiye','Degisim','DonemOrtalamasi','Sapma','GelenFatura','GidenFatura','AlinanCekSenet','VerilenCekSenet'];
     $definition = null;
 
     if (in_array($id, ['executive_overview','period_comparison','performance_anomalies'], true)) {
-        $p1 = $period('fb.FaturaTarih'); $p2 = $period('k.islemTarihi'); $p3 = $period('b.tarih');
+        $p1 = $period('fb.FaturaTarih'); $p2 = $period('k.islemTarihi'); $p3 = $period('b.tarih'); $p4 = $period('c.bas_tarih');
         $base = "SELECT Donem, ROUND(SUM(NetTutar),2) NetTutar, SUM(Fatura) Fatura, SUM(Urun) Urun,
+                    ROUND(SUM(GelenFatura),2) GelenFatura, ROUND(SUM(GidenFatura),2) GidenFatura,
                     ROUND(SUM(Tahsilat),2) Tahsilat, ROUND(SUM(Odeme),2) Odeme,
+                    ROUND(SUM(AlinanCekSenet),2) AlinanCekSenet, ROUND(SUM(VerilenCekSenet),2) VerilenCekSenet,
                     ROUND(SUM(Tahsilat)-SUM(Odeme),2) NetNakit, SUM(Musteri) Musteri
                 FROM (
                     SELECT $p1 Donem,
-                        SUM(CASE WHEN fb.FaturaTuru=1 THEN $lineTotal WHEN fb.FaturaTuru=2 THEN -$lineTotal ELSE 0 END) NetTutar,
-                        COUNT(DISTINCT fb.ID) Fatura,
-                        SUM(CASE WHEN fb.FaturaTuru=1 THEN fd.miktar WHEN fb.FaturaTuru=2 THEN -fd.miktar ELSE 0 END) Urun,
-                        0 Tahsilat, 0 Odeme, COUNT(DISTINCT CASE WHEN fb.FaturaTuru IN (1,2) THEN fb.MusteriID END) Musteri
+                        SUM(CASE WHEN fb.FaturaTuru=1 AND $eligibleSale THEN $lineTotal WHEN fb.FaturaTuru=2 AND $eligibleSale THEN -$lineTotal ELSE 0 END) NetTutar,
+                        COUNT(DISTINCT CASE WHEN fb.FaturaTuru IN (1,2) AND $eligibleSale THEN fb.ID END) Fatura,
+                        SUM(CASE WHEN fb.FaturaTuru=1 AND $eligibleSale THEN fd.miktar WHEN fb.FaturaTuru=2 AND $eligibleSale THEN -fd.miktar ELSE 0 END) Urun,
+                        SUM(CASE WHEN fb.FaturaTuru=3 THEN $lineTotal WHEN fb.FaturaTuru=4 THEN -$lineTotal ELSE 0 END) GelenFatura,
+                        SUM(CASE WHEN fb.FaturaTuru=1 AND $eligibleSale THEN $lineTotal WHEN fb.FaturaTuru=2 AND $eligibleSale THEN -$lineTotal ELSE 0 END) GidenFatura,
+                        0 Tahsilat, 0 Odeme, 0 AlinanCekSenet, 0 VerilenCekSenet,
+                        COUNT(DISTINCT CASE WHEN fb.FaturaTuru IN (1,2) AND $eligibleSale THEN fb.MusteriID END) Musteri
                     FROM faturadetay fd JOIN faturabaslik fb ON fb.ID=fd.faturaID LEFT JOIN asp_urun u ON u.ID=fd.urunID
-                    WHERE {$range('fb.FaturaTarih')} AND fb.FaturaTuru IN (1,2) AND $eligibleSale GROUP BY $p1
+                    WHERE {$range('fb.FaturaTarih')} AND fb.FaturaTuru IN (1,2,3,4) GROUP BY $p1
                     UNION ALL
-                    SELECT $p2,0,0,0,SUM(CASE WHEN k.Islem=1 THEN k.Miktar ELSE 0 END),SUM(CASE WHEN k.Islem=2 THEN k.Miktar ELSE 0 END),0
+                    SELECT $p2,0,0,0,0,0,SUM(CASE WHEN k.Islem=1 THEN k.Miktar ELSE 0 END),SUM(CASE WHEN k.Islem=2 THEN k.Miktar ELSE 0 END),0,0,0
                     FROM kasa k WHERE {$range('k.islemTarihi')} GROUP BY $p2
                     UNION ALL
-                    SELECT $p3,0,0,0,SUM(CASE WHEN b.yatirildi=1 THEN b.para ELSE 0 END),SUM(CASE WHEN b.cekildi=1 THEN b.para ELSE 0 END),0
+                    SELECT $p3,0,0,0,0,0,SUM(CASE WHEN b.yatirildi=1 THEN b.para ELSE 0 END),SUM(CASE WHEN b.cekildi=1 THEN b.para ELSE 0 END),0,0,0
                     FROM banka_kasa b WHERE {$range('b.tarih')} GROUP BY $p3
+                    UNION ALL
+                    SELECT $p4,0,0,0,0,0,0,0,
+                        SUM(CASE WHEN c.alindi=1 THEN c.miktar ELSE 0 END),SUM(CASE WHEN c.verildi=1 THEN c.miktar ELSE 0 END),0
+                    FROM cek_senet_kasa c WHERE {$range('c.bas_tarih')} GROUP BY $p4
                 ) x GROUP BY Donem";
         $sql = $base;
         $columns = ['Donem'=>'Dönem','NetTutar'=>'Net Hasılat','Fatura'=>'Fatura','Urun'=>'Ürün Adedi','Tahsilat'=>'Tahsilat','Odeme'=>'Ödeme','NetNakit'=>'Net Nakit','Musteri'=>'Aktif Müşteri'];
+        if ($id === 'executive_overview') {
+            $columns = ['Donem'=>'Dönem','NetTutar'=>'Net Hasılat','Fatura'=>'Fatura','Urun'=>'Ürün Adedi',
+                'GelenFatura'=>'Gelen Fatura Toplamı','GidenFatura'=>'Giden Fatura Toplamı',
+                'Tahsilat'=>'Tahsilat','Odeme'=>'Ödeme','AlinanCekSenet'=>'Alınan Çek/Senet',
+                'VerilenCekSenet'=>'Verilen Çek/Senet','NetNakit'=>'Net Nakit','Musteri'=>'Aktif Müşteri'];
+        }
         if ($id === 'period_comparison') {
             $sql = "SELECT z.*, ROUND(z.NetTutar-LAG(z.NetTutar) OVER (ORDER BY z.Donem),2) Degisim,
                     ROUND(CASE WHEN LAG(z.NetTutar) OVER (ORDER BY z.Donem)<>0 THEN (z.NetTutar/LAG(z.NetTutar) OVER (ORDER BY z.Donem)-1)*100 ELSE NULL END,2) DegisimYuzde FROM ($base) z";
@@ -83,7 +98,7 @@ function business_report_definition(string $id, string $grouping, string $start,
                     ROUND(z.NetTutar-AVG(z.NetTutar) OVER (),2) Sapma FROM ($base) z";
             $columns += ['DonemOrtalamasi'=>'Dönem Ortalaması','Sapma'=>'Sapma'];
         }
-        $definition = compact('sql','columns') + ['params'=>$dateParams(3),'chart'=>['NetTutar','Tahsilat','Odeme']];
+        $definition = compact('sql','columns') + ['params'=>$dateParams(4),'chart'=>['NetTutar','Tahsilat','Odeme']];
     }
 
     if ($id === 'revenue') {
@@ -340,6 +355,22 @@ function business_report_run(string $id, string $grouping, array $range, int $pa
     $statement = db()->prepare("SELECT * FROM ($base) report_rows ORDER BY `$sortKey` $direction LIMIT $perPage OFFSET $offset");
     $statement->execute($params);
     $rawRows = $statement->fetchAll();
+    $numericNativeTypes = ['TINY','SHORT','LONG','LONGLONG','INT24','DECIMAL','NEWDECIMAL','FLOAT','DOUBLE'];
+    $numericKeys = [];
+    foreach (array_keys($columns) as $index => $key) {
+        $meta = $statement->getColumnMeta($index) ?: [];
+        if (in_array(strtoupper((string)($meta['native_type'] ?? '')), $numericNativeTypes, true) && !preg_match('/ID$/i', $key)) {
+            $numericKeys[] = $key;
+        }
+    }
+    $totals = [];
+    if ($numericKeys !== []) {
+        $expressions = array_map(fn(string $key):string=>'SUM(COALESCE(`'.$key.'`,0)) AS `'.$key.'`', $numericKeys);
+        $totalsStatement = db()->prepare('SELECT '.implode(',',$expressions)." FROM ($base) report_totals");
+        $totalsStatement->execute($params);
+        $rawTotals = $totalsStatement->fetch() ?: [];
+        foreach ($numericKeys as $key) $totals[$columns[$key]] = $rawTotals[$key] ?? 0;
+    }
     $rows = [];
     foreach ($rawRows as $raw) {
         $row = [];
@@ -354,6 +385,7 @@ function business_report_run(string $id, string $grouping, array $range, int $pa
     return [
         'id'=>$id,'title'=>$catalog[$id]['label'],'group'=>$catalog[$id]['group'],'grouping'=>$grouping,'range'=>$range,
         'columns'=>array_values($columns),'rows'=>$rows,'chart_rows'=>$chartRows,
+        'totals'=>$totals,'numeric_columns'=>array_values(array_map(fn(string $key):string=>$columns[$key],$numericKeys)),
         'money_columns'=>$moneyColumns,'currency'=>setting_get('default_currency','TL'),
         'chart_series'=>array_values(array_filter(array_map(fn(string $key): ?string => $columns[$key] ?? null, $definition['chart'] ?? []))),
         'page'=>$page,'per_page'=>$perPage,'total'=>$total,'pages'=>max(1,(int)ceil($total/$perPage)),

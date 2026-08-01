@@ -97,13 +97,10 @@ $user = current_user();
                     <div class="menu-panel">
                         <button type="button" data-open-production-list="all" data-label="Üretim Projeleri" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Üretim Projeleri</button>
                         <button type="button" data-open-production-new class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Yeni Üretim Kaydı</button>
-                        <div class="border-t border-slate-700 px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">İş Takibi</div>
-                        <button type="button" data-open-production-list="reading" data-label="Okuma Bekleyen İşler" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Okuma Bekleyenler</button>
-                        <button type="button" data-open-production-list="layout" data-label="Dizgi Bekleyen İşler" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Dizgi Bekleyenler</button>
-                        <button type="button" data-open-production-list="cover" data-label="Kapak Bekleyen İşler" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Kapak Bekleyenler</button>
-                        <button type="button" data-open-production-list="printing" data-label="Baskıdaki İşler" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Baskıdaki İşler</button>
-                        <button type="button" data-open-production-list="completed" data-label="Tamamlanan Üretimler" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Tamamlananlar</button>
                         <button type="button" data-open-production-balances class="block w-full whitespace-nowrap border-t border-slate-700 px-4 py-2 text-left text-sm hover:bg-blue-600">Üretim Bakiyeleri</button>
+                        <div class="border-t border-slate-700 px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Raporlar</div>
+                        <button type="button" data-open-production-report="returning_authors" data-label="Geri Dönen Yazarlar" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Geri Dönen Yazarlar</button>
+                        <button type="button" data-open-production-report="package_distribution" data-label="Paket Dağılımı" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Paket Dağılımı</button>
                     </div>
                 </div>
                 <div class="group relative flex items-center px-3 text-sm hover:bg-slate-700">

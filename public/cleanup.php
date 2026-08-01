@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
 require APP_ROOT . '/app/cleanup_service.php';
+require APP_ROOT . '/app/cup_cleanup_service.php';
+require APP_ROOT . '/app/production_schema_cleanup.php';
 
 $user = current_user();
 if ($user === null) {
@@ -17,13 +19,13 @@ if (($user['role'] ?? '') !== 'administrator') {
 set_time_limit(0);
 $mode = ($_GET['mode'] ?? 'preview') === 'apply' ? 'apply' : 'preview';
 $requestedSection = (string) ($_GET['section'] ?? 'products');
-$cleanupAreas = ['legacy', 'product_fields', 'currency', 'payments', 'obsolete'];
+$cleanupAreas = ['legacy', 'product_fields', 'cup_fields', 'currency', 'payments', 'obsolete'];
 $cleanupArea = in_array((string) ($_GET['cleanup_area'] ?? 'legacy'), $cleanupAreas, true) ? (string) $_GET['cleanup_area'] : 'legacy';
 if (in_array($requestedSection, $cleanupAreas, true)) {
     $section = 'structure_cleanup';
     $cleanupArea = $requestedSection;
 } else {
-    $section = in_array($requestedSection, ['products', 'linked', 'addresses', 'structure_cleanup', 'engine'], true) ? $requestedSection : 'products';
+    $section = in_array($requestedSection, ['products', 'linked', 'addresses', 'structure_cleanup', 'engine', 'cup_email_matches'], true) ? $requestedSection : 'products';
 }
 $page = max(1, (int) ($_GET['page'] ?? 1));
 $perPage = cleanup_page_size((int) ($_GET['per_page'] ?? 250));
@@ -84,6 +86,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'convert_myisam_to_innodb') {
             $operationResult = cleanup_convert_myisam_to_innodb();
             $message = 'MyISAM → InnoDB dönüştürme işlemi tamamlandı.';
+        } elseif ($action === 'apply_cup_email_matches') {
+            $operationResult = cleanup_apply_cup_email_matches((string) ($_POST['selected_matches'] ?? ''));
+            $message = 'Seçilen üretim e-posta eşleşmeleri CUP veritabanına aktarıldı.';
+        } elseif ($action === 'cleanup_cup_unused_fields') {
+            $operationResult = production_drop_unused_fields($_POST['fields'] ?? []);
+            $message = 'Seçilen kullanılmayan CUP üretim alanları kaldırıldı.';
         } else {
             throw new InvalidArgumentException('Bilinmeyen temizleme işlemi.');
         }
@@ -95,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $data = null;
 $legacyStatus = null;
 $productFieldsStatus = null;
+$cupFieldsStatus = null;
 $currencyStatus = null;
 $paymentsStatus = null;
 $obsoleteStatus = null;
@@ -113,10 +122,12 @@ try {
         : cleanup_address_page($page, $perPage, $query);
     if ($section === 'structure_cleanup' && $cleanupArea === 'legacy') $legacyStatus = cleanup_legacy_status();
     if ($section === 'structure_cleanup' && $cleanupArea === 'product_fields') $productFieldsStatus = cleanup_product_fields_status();
+    if ($section === 'structure_cleanup' && $cleanupArea === 'cup_fields') $cupFieldsStatus = production_unused_field_profile();
     if ($section === 'structure_cleanup' && $cleanupArea === 'currency') $currencyStatus = cleanup_legacy_status()['currency.tables_and_references'];
     if ($section === 'structure_cleanup' && $cleanupArea === 'payments') $paymentsStatus = cleanup_legacy_status()['payments.tables'];
     if ($section === 'structure_cleanup' && $cleanupArea === 'obsolete') $obsoleteStatus = cleanup_legacy_status()['obsolete.tables'];
     if ($section === 'engine') $engineStatus = cleanup_myisam_status();
+    if ($section === 'cup_email_matches') $data = cleanup_cup_match_page($page, $perPage, $query);
 } catch (Throwable $exception) {
     $error = $error !== '' ? $error : $exception->getMessage();
 }
@@ -169,6 +180,10 @@ function cleanup_result_label(string $key): string
         'already_missing' => 'Önceden kaldırılmış alan',
         'detected_myisam_tables' => 'Bulunan MyISAM tablo', 'converted_tables' => 'InnoDB yapılan tablo',
         'failed_tables' => 'Dönüştürülemeyen tablolar', 'remaining_myisam_tables' => 'Kalan MyISAM tablo',
+        'selected_matches' => 'Seçilen üretim eşleşmesi', 'updated_emails' => 'Güncellenen üretim e-postası',
+        'updated_contract_dates' => 'Eklenen sözleşme tarihi', 'skipped_matches' => 'Yeniden doğrulamada atlanan',
+        'selected_fields' => 'Seçilen CUP alanı', 'removed_cup_fields' => 'Kaldırılan CUP alanı',
+        'skipped_cup_fields' => 'Kural değiştiği için atlanan CUP alanı',
     ][$key] ?? $key;
 }
 ?>
@@ -221,7 +236,7 @@ function cleanup_result_label(string $key): string
     </div>
 
     <nav class="flex flex-wrap gap-1 border-b border-slate-300">
-        <?php foreach (['products'=>'1. Silinebilir ürünler','linked'=>'2. Yazara bağlı ayrı liste','addresses'=>'3. Cari/adres temizliği','structure_cleanup'=>'4. Tablo / alan temizliği','engine'=>'5. InnoDB dönüşümü'] as $key=>$label): ?>
+        <?php foreach (['products'=>'1. Silinebilir ürünler','linked'=>'2. Yazara bağlı ayrı liste','addresses'=>'3. Cari/adres temizliği','structure_cleanup'=>'4. Tablo / alan temizliği','engine'=>'5. InnoDB dönüşümü','cup_email_matches'=>'6. Üretim e-posta eşleştirme'] as $key=>$label): ?>
             <a href="<?= h(cleanup_url(['section'=>$key,'page'=>1])) ?>" class="rounded-t border border-b-0 px-4 py-2 text-sm <?= $section === $key ? 'border-slate-300 bg-white font-semibold text-blue-800' : 'border-transparent text-slate-600 hover:bg-slate-200' ?>"><?= h($label) ?></a>
         <?php endforeach; ?>
     </nav>
@@ -296,9 +311,30 @@ function cleanup_result_label(string $key): string
         <?php else: ?>
         <section class="rounded-b-lg rounded-tr-lg border border-slate-300 bg-white"><div class="border-b border-slate-200 p-4"><div class="flex flex-wrap items-center gap-4"><div><h2 class="font-semibold">Ürünü ve faturası olmayan cari/adres kayıtları</h2><p class="text-sm text-slate-500">Toplam <?= number_format($data['total'],0,',','.') ?> aday. Herhangi bir finans hareketinde kullanılan kayıtlar korunur ve seçilemez.</p></div><form method="get" class="ml-auto flex items-center gap-2"><input type="hidden" name="mode" value="<?= h($mode) ?>"><input type="hidden" name="section" value="addresses"><input type="hidden" name="per_page" value="<?= $perPage ?>"><input class="form-input w-80" name="q" value="<?= h($query) ?>" placeholder="ID, ad, firma veya e-posta ara…"><button class="toolbar-button" type="submit">Ara</button><?php if($query!==''): ?><a class="toolbar-button" href="<?= h(cleanup_url(['q'=>'','page'=>1])) ?>">Temizle</a><?php endif; ?></form></div><div class="mt-3"><?= cleanup_pagination($data) ?></div></div><form method="post"><input type="hidden" name="_token" value="<?= h(csrf_token()) ?>"><input type="hidden" name="action" value="delete_addresses"><input type="hidden" name="selected_ids" data-selected-ids><div class="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2"><button type="button" class="toolbar-button" data-flag-found <?= $mode==='preview' ? 'disabled' : '' ?>>⚑ Bulunanları İşaretle</button><span class="text-xs text-slate-500">Bu sayfadaki korunmayan <?= number_format(count($data['rows']),0,',','.') ?> sonuç içinde seçim yapar.</span></div><div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-200"><tr><th class="p-2"><input type="checkbox" data-check-all></th><th class="p-2 text-left">ID</th><th class="p-2 text-left">Ad / Firma</th><th class="p-2 text-left">E-posta</th><th class="p-2 text-right">Koruyan diğer finans kaydı</th></tr></thead><tbody><?php foreach($data['rows'] as $row): $protected=(int)$row['financial_references']>0; ?><tr class="border-t border-slate-200 <?= $protected ? 'bg-amber-50' : '' ?>"><td class="p-2"><input type="checkbox" value="<?= (int)$row['ID'] ?>" data-row-check <?= ($mode === 'preview' || $protected) ? 'disabled' : '' ?>></td><td class="p-2"><?= (int)$row['ID'] ?></td><td class="p-2 font-medium"><?= h($row['FirmaAd'] ?: trim($row['Ad'].' '.$row['Soyad'])) ?></td><td class="p-2"><?= h($row['eposta']) ?></td><td class="p-2 text-right <?= $protected ? 'font-semibold text-amber-800' : 'text-emerald-700' ?>"><?php if($protected): ?><button type="button" class="rounded border border-amber-300 bg-white px-2 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100" data-financial-details="<?= (int)$row['ID'] ?>"><?= (int)$row['financial_references'] ?> — Kayıtları göster</button><?php else: ?>0<?php endif; ?></td></tr><?php endforeach; ?><?php if($data['rows']===[]): ?><tr><td colspan="5" class="p-8 text-center text-slate-500">Aramayla eşleşen cari/adres adayı bulunamadı.</td></tr><?php endif; ?></tbody></table></div><?php if($mode==='apply' && $data['rows']!==[]): include __DIR__.'/partials/cleanup_confirmation.php'; endif; ?></form></section>
         <?php endif; ?>
+    <?php elseif ($section === 'cup_email_matches' && $data !== null): ?>
+        <section class="rounded-lg border border-slate-300 bg-white">
+            <div class="border-b border-slate-200 p-4">
+                <div class="flex flex-wrap items-start gap-4">
+                    <div class="min-w-0 flex-1"><h2 class="font-semibold">CUP üretim e-postalarını kitap ve yazarla eşleştir</h2><p class="mt-1 text-sm text-slate-500"><code>cup_veri.cinius_uretim</code> içinde <code><?= h(CUP_PLACEHOLDER_EMAIL) ?></code> kullanan kayıtlar; ürün adı, yazar ilişkisi ve varsa ISBN ile karşılaştırılır. Yalnızca yüksek güvenli en iyi eşleşmeler gösterilir. Seçilen satırlarda e-posta, ürünün <code>CinYazarID</code> cari kartından alınır. CUP sözleşme tarihi boşsa ürünün eklenme tarihi, bulunamazsa baskı tarihi kullanılır.</p><p class="mt-2 text-xs text-amber-800">“Yakın alternatif var” uyarılı satırları özellikle dikkatli inceleyin; sistem bunları otomatik seçmez.</p></div>
+                    <form method="get" class="flex items-center gap-2"><input type="hidden" name="mode" value="<?= h($mode) ?>"><input type="hidden" name="section" value="cup_email_matches"><input type="hidden" name="per_page" value="<?= $perPage ?>"><input class="form-input w-80" name="q" value="<?= h($query) ?>" placeholder="CUP ID, kitap, yazar veya e-posta ara…"><button class="toolbar-button" type="submit">Ara</button><?php if($query!==''): ?><a class="toolbar-button" href="<?= h(cleanup_url(['q'=>'','page'=>1])) ?>">Temizle</a><?php endif; ?></form>
+                </div>
+                <div class="mt-3 flex items-center gap-3"><strong><?= number_format((int)$data['total'],0,',','.') ?> yüksek güvenli eşleşme</strong><div class="ml-auto"><?= cleanup_pagination($data) ?></div></div>
+            </div>
+            <form method="post"><input type="hidden" name="_token" value="<?= h(csrf_token()) ?>"><input type="hidden" name="action" value="apply_cup_email_matches"><input type="hidden" name="selected_matches" data-selected-ids>
+                <div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-200"><tr><th class="p-2"><input type="checkbox" data-check-all <?= $mode==='preview'?'disabled':'' ?>></th><th class="p-2 text-left">Güven</th><th class="p-2 text-left">CUP üretim kaydı</th><th class="p-2 text-left">Eşleşen ana uygulama ürünü</th><th class="p-2 text-left">Aktarılacak e-posta</th><th class="p-2 text-left">Tarih işlemi</th></tr></thead><tbody>
+                    <?php foreach($data['rows'] as $row): ?><tr class="border-t border-slate-200 align-top <?= $row['ambiguous'] ? 'bg-amber-50' : 'hover:bg-blue-50' ?>"><td class="p-2"><input type="checkbox" value="<?= (int)$row['cup_id'] ?>:<?= (int)$row['product_id'] ?>" data-row-check <?= $mode==='preview'?'disabled':'' ?>></td><td class="whitespace-nowrap p-2"><strong class="text-emerald-700">%<?= number_format((float)$row['score'],1,',','.') ?></strong><div class="text-xs text-slate-500">Yazar %<?= number_format((float)$row['author_score'],1,',','.') ?> · Kitap %<?= number_format((float)$row['title_score'],1,',','.') ?></div><?php if($row['isbn_exact']): ?><span class="mt-1 inline-block rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-800">ISBN aynı</span><?php endif; ?><?php if($row['ambiguous']): ?><span class="mt-1 block text-xs font-semibold text-amber-800">Yakın alternatif var</span><?php endif; ?></td><td class="p-2"><strong>#<?= (int)$row['cup_id'] ?> — <?= h($row['cup_title']) ?></strong><div class="text-xs text-slate-600"><?= h($row['cup_author']) ?><?= $row['cup_isbn']!=='' ? ' · ISBN '.h($row['cup_isbn']) : '' ?><?= $row['cup_package']!=='' ? ' · '.h($row['cup_package']) : '' ?></div></td><td class="p-2"><strong>#<?= (int)$row['product_id'] ?> — <?= h($row['product_title']) ?></strong><div class="text-xs text-slate-600">Cari #<?= (int)$row['author_id'] ?> — <?= h($row['product_author']) ?><?= $row['product_isbn']!=='' ? ' · ISBN '.h($row['product_isbn']) : '' ?></div></td><td class="p-2 font-medium text-blue-800"><?= h($row['email']) ?></td><td class="p-2 text-xs"><?php if($row['cup_contract_date']!==null): ?><span class="text-slate-500">Korunacak: <?= h(substr((string)$row['cup_contract_date'],0,10)) ?></span><?php elseif($row['source_date']!==null): ?><span class="font-semibold text-emerald-700">Eklenecek: <?= h(substr((string)$row['source_date'],0,10)) ?></span><?php else: ?><span class="text-amber-800">Kaynak tarih bulunamadı</span><?php endif; ?></td></tr><?php endforeach; ?>
+                    <?php if($data['rows']===[]): ?><tr><td colspan="6" class="p-8 text-center text-slate-500">Yüksek güven eşiğini geçen eşleşme bulunamadı.</td></tr><?php endif; ?>
+                </tbody></table></div>
+                <div class="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t <?= $mode==='apply' ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50' ?> p-4 shadow-lg">
+                    <?php if($data['rows']===[]): ?><span class="mr-auto text-sm text-slate-600">Aktarılabilecek eşleşme bulunamadı.</span><button class="rounded bg-slate-300 px-4 py-2 font-semibold text-slate-600" type="button" disabled>E-posta aktarımı yapılamaz</button>
+                    <?php elseif($mode==='preview'): ?><span class="mr-auto text-xs text-amber-900">Eşleşmeleri seçmek ve aktarım düğmesini açmak için Uygulama moduna geçin.</span><a class="rounded bg-amber-700 px-4 py-2 font-semibold text-white hover:bg-amber-600" href="<?= h(cleanup_url(['mode'=>'apply','section'=>'cup_email_matches','page'=>1])) ?>">Uygulama moduna geç ve seçimi aç</a>
+                    <?php else: ?><span class="mr-auto text-xs text-emerald-900">Yalnızca işaretlenen eşleşmeler işlem anında yeniden doğrulanır ve CUP veritabanında güncellenir.</span><button class="rounded bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-600" type="submit">Seçilen e-posta ve tarihleri aktar</button><?php endif; ?>
+                </div>
+            </form>
+        </section>
     <?php elseif ($section === 'structure_cleanup'): ?>
         <nav class="flex flex-wrap gap-2 rounded-t-lg border border-b-0 border-slate-300 bg-white p-4">
-            <?php foreach (['legacy'=>'Legacy alanlar ve ilişkiler','product_fields'=>'Ürün alanları','currency'=>'Döviz yapısı','payments'=>'Ödeme tabloları','obsolete'=>'Eski tablolar'] as $key=>$label): ?>
+            <?php foreach (['legacy'=>'Legacy alanlar ve ilişkiler','product_fields'=>'Ürün alanları','cup_fields'=>'CUP üretim alanları','currency'=>'Döviz yapısı','payments'=>'Ödeme tabloları','obsolete'=>'Eski tablolar'] as $key=>$label): ?>
                 <a href="<?= h(cleanup_url(['section'=>'structure_cleanup','cleanup_area'=>$key,'page'=>1])) ?>" class="rounded border px-3 py-2 text-sm <?= $cleanupArea === $key ? 'border-blue-700 bg-blue-700 font-semibold text-white' : 'border-slate-300 bg-white hover:bg-slate-50' ?>"><?= h($label) ?></a>
             <?php endforeach; ?>
         </nav>
@@ -309,6 +345,21 @@ function cleanup_result_label(string $key): string
             <div class="border-b border-slate-200 p-4"><h2 class="font-semibold">asp_urun eski alanlarını açıklamaya aktar ve kaldır</h2><p class="mt-1 text-sm text-slate-500">Boş, NULL veya 0 olmayan değerler <code>alanAdı: değer</code> biçiminde mevcut <code>aciklama</code> metninin altına eklenir. Ardından mevcut eski sütunların tamamı tek ALTER TABLE işlemiyle kaldırılır.</p><div class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><strong><?= number_format((int)$productFieldsStatus['affected_rows'],0,',','.') ?></strong> üründe açıklamaya aktarılacak en az bir değer var. <strong><?= number_format(count($productFieldsStatus['existing_columns']),0,',','.') ?></strong> alan halen tabloda mevcut.</div></div>
             <div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-200"><tr><th class="p-2 text-left">Alan</th><th class="p-2 text-left">Durum</th><th class="p-2 text-right">Dolu ürün</th></tr></thead><tbody><?php foreach($productFieldsStatus['configured_columns'] as $field): $exists=in_array($field,$productFieldsStatus['existing_columns'],true); ?><tr class="border-t border-slate-200"><td class="p-2 font-mono"><?= h($field) ?></td><td class="p-2 <?= $exists ? 'text-amber-800' : 'text-slate-500' ?>"><?= $exists ? 'Açıklamaya aktarılıp kaldırılacak' : 'Zaten kaldırılmış' ?></td><td class="p-2 text-right"><?= number_format((int)($productFieldsStatus['field_counts'][$field] ?? 0),0,',','.') ?></td></tr><?php endforeach; ?></tbody></table></div>
             <form method="post"><input type="hidden" name="_token" value="<?= h(csrf_token()) ?>"><input type="hidden" name="action" value="cleanup_product_fields"><div class="flex items-center justify-end gap-3 border-t border-red-200 bg-red-50 p-4"><span class="mr-auto text-xs text-red-800"><?= !$productFieldsStatus['description_available'] ? 'aciklama alanı bulunamadığı için işlem yapılamaz.' : ($mode==='preview' ? 'İşlemi çalıştırmak için Uygulama moduna geçin.' : 'Bu işlem sütunları kalıcı olarak kaldırır.') ?></span><button class="rounded bg-red-700 px-4 py-2 font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50" type="submit" <?= ($mode!=='apply'||!$productFieldsStatus['ready'])?'disabled':'' ?>>Açıklamaya aktar ve alanları kaldır</button></div></form>
+        </section>
+        <?php elseif ($cleanupArea === 'cup_fields' && $cupFieldsStatus !== null): ?>
+        <section class="rounded-b-lg rounded-tr-lg border border-slate-300 bg-white">
+            <div class="border-b border-slate-200 p-4"><h2 class="font-semibold">cup_veri.cinius_uretim kullanılmayan alan analizi</h2><p class="mt-1 text-sm text-slate-500">Bir alanın baskın değeri tüm <strong><?= number_format((int)$cupFieldsStatus['rows'],0,',','.') ?></strong> kaydın en az %95’inde aynıysa, en yeni <strong><?= number_format((int)$cupFieldsStatus['recent_rows'],0,',','.') ?></strong> kaydın tamamında da aynı değer bulunuyorsa kaldırılabilir kabul edilir. Alanlar uygulama arayüzünden ve üretim sorgularından çıkarılmıştır. Silme anında istatistikler yeniden hesaplanır.</p><div class="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><strong><?= number_format(count($cupFieldsStatus['safe_fields']),0,',','.') ?></strong> alan halen kurala uyuyor ve seçilerek kaldırılabilir. Baskın olmayan tarihsel değerler sütunla birlikte kalıcı olarak silinir.</div></div>
+            <form method="post"><input type="hidden" name="_token" value="<?= h(csrf_token()) ?>"><input type="hidden" name="action" value="cleanup_cup_unused_fields">
+                <div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-slate-200"><tr><th class="p-2"><input type="checkbox" data-check-all <?= $mode==='preview'?'disabled':'' ?>></th><th class="p-2 text-left">Alan</th><th class="p-2 text-left">Tür</th><th class="p-2 text-left">Baskın değer</th><th class="p-2 text-right">Baskın oran</th><th class="p-2 text-right">Farklı tarihsel kayıt</th><th class="p-2 text-left">Son 500</th><th class="p-2 text-left">Durum</th></tr></thead><tbody>
+                    <?php foreach($cupFieldsStatus['fields'] as $field): ?><tr class="border-t border-slate-200 <?= $field['qualifies'] ? 'hover:bg-blue-50' : 'bg-amber-50' ?>"><td class="p-2"><input type="checkbox" name="fields[]" value="<?= h($field['field']) ?>" data-row-check <?= ($mode==='preview'||!$field['qualifies'])?'disabled':'' ?>></td><td class="p-2 font-mono font-semibold"><?= h($field['field']) ?></td><td class="p-2 font-mono text-xs text-slate-500"><?= h($field['type']) ?></td><td class="max-w-56 truncate p-2 font-mono text-xs" title="<?= h($field['dominant_value']) ?>"><?= h($field['dominant_value']) ?></td><td class="p-2 text-right font-semibold">%<?= number_format((float)$field['dominant_percent'],2,',','.') ?></td><td class="p-2 text-right"><?= number_format((int)$field['non_dominant_count'],0,',','.') ?></td><td class="p-2 font-mono text-xs"><?= h($field['recent_value']) ?> · <?= (int)$field['recent_distinct_values'] ?> değer</td><td class="p-2 <?= $field['qualifies'] ? 'text-emerald-700' : 'text-amber-800' ?>"><?= $field['qualifies'] ? 'Kaldırılabilir' : 'Kural artık karşılanmıyor' ?></td></tr><?php endforeach; ?>
+                    <?php if($cupFieldsStatus['fields']===[]): ?><tr><td colspan="8" class="p-8 text-center text-slate-500">Yapılandırılmış kullanılmayan CUP alanlarının tamamı daha önce kaldırılmış.</td></tr><?php endif; ?>
+                </tbody></table></div>
+                <div class="flex items-center justify-end gap-3 border-t <?= $mode==='apply' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50' ?> p-4">
+                    <?php if($cupFieldsStatus['safe_fields']===[]): ?><span class="mr-auto text-sm text-emerald-800">Kaldırılabilecek CUP alanı kalmadı.</span>
+                    <?php elseif($mode==='preview'): ?><span class="mr-auto text-xs text-amber-900">Alanları seçmek ve kaldırma düğmesini açmak için Uygulama moduna geçin.</span><a class="rounded bg-amber-700 px-4 py-2 font-semibold text-white hover:bg-amber-600" href="<?= h(cleanup_url(['mode'=>'apply','section'=>'structure_cleanup','cleanup_area'=>'cup_fields','page'=>1])) ?>">Uygulama moduna geç ve seçimi aç</a>
+                    <?php else: ?><span class="mr-auto text-xs text-red-800">Bu işlem seçilen sütunları ve içlerindeki tarihsel değerleri kalıcı olarak kaldırır.</span><button class="rounded bg-red-700 px-4 py-2 font-semibold text-white hover:bg-red-600" type="submit">Seçili CUP alanlarını kaldır</button><?php endif; ?>
+                </div>
+            </form>
         </section>
         <?php elseif ($cleanupArea === 'currency' && $currencyStatus !== null): ?>
         <section class="rounded-b-lg rounded-tr-lg border border-slate-300 bg-white">

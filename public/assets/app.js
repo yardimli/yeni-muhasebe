@@ -51,13 +51,14 @@
       z: Number(win.el.style.zIndex) || 0,
     };
     const s = win.state || {};
-    if (win.kind === 'table') return {...base, state: {table: s.table, label: s.label, filter: s.filter || null, titleLookup: s.titleLookup || null, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
+    if (win.kind === 'table') return {...base, state: {table: s.table, label: s.label, filter: s.filter || null, periodFilter: s.periodFilter || null, titleLookup: s.titleLookup || null, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'report') return {...base, state: {report: s.report, id: s.id, label: s.label, titleLookup: s.titleLookup || null, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'business_report') return {...base, state: {report: s.report, label: s.label, page: s.page, perPage: s.perPage, sort: s.sort, dir: s.dir, grouping: s.grouping, preset: s.preset, start: s.start || '', end: s.end || '', chartExpanded: Boolean(s.chartExpanded)}};
     if (win.kind === 'invoice') return {...base, state: {id: s.id, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'editor') return {...base, state: {table: s.table, label: s.label, id: s.id || null, parentKey: s.parentKey || null}};
     if (win.kind === 'settings') return {...base, state: {section: s.section}};
     if (win.kind === 'production_list') return {...base, state: {view: s.view, label: s.label, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
+    if (win.kind === 'production_report') return {...base, state: {report: s.report, label: s.label, page: s.page, perPage: s.perPage, sort: s.sort, dir: s.dir, grouping: s.grouping, preset: s.preset, start: s.start || '', end: s.end || '', chartExpanded: Boolean(s.chartExpanded)}};
     if (win.kind === 'production_project') return {...base, state: {id: s.id || null}};
     return null;
   }
@@ -77,7 +78,8 @@
   function storedWindowDescriptors() {
     try {
       const parsed = JSON.parse(localStorage.getItem(windowStorageKey) || '[]');
-      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings', 'production_list', 'production_project'].includes(item.kind) && item.state) : [];
+      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings', 'production_list', 'production_report', 'production_project'].includes(item.kind) && item.state)
+        .filter(item => item.kind !== 'production_list' || ['all','balances'].includes(item.state.view)) : [];
     } catch (_) {
       return [];
     }
@@ -355,6 +357,9 @@
     if (win.kind === 'production_list') {
       return `?action=list&view=${encodeURIComponent(s.view)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}`;
     }
+    if (win.kind === 'production_report') {
+      return `?action=report&report=${encodeURIComponent(s.report)}&grouping=${encodeURIComponent(s.grouping)}&preset=${encodeURIComponent(s.preset)}&start=${encodeURIComponent(s.start || '')}&end=${encodeURIComponent(s.end || '')}&page=${page}&per_page=${perPage}&sort=${encodeURIComponent(s.sort || '')}&dir=${s.dir}`;
+    }
     if (win.kind === 'invoice') {
       return `?action=invoice&id=${encodeURIComponent(s.id)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}`;
     }
@@ -365,7 +370,8 @@
       return `?action=business_report&report=${encodeURIComponent(s.report)}&grouping=${encodeURIComponent(s.grouping)}&preset=${encodeURIComponent(s.preset)}&start=${encodeURIComponent(s.start || '')}&end=${encodeURIComponent(s.end || '')}&page=${page}&per_page=${perPage}&sort=${encodeURIComponent(s.sort || '')}&dir=${s.dir}`;
     }
     const filterQuery = s.filter ? `&filter_column=${encodeURIComponent(s.filter.column)}&filter_value=${encodeURIComponent(s.filter.value)}` : '';
-    return `?action=list&table=${encodeURIComponent(s.table)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}${filterQuery}`;
+    const periodQuery = s.periodFilter ? `&period_start=${encodeURIComponent(s.periodFilter.start)}&period_end=${encodeURIComponent(s.periodFilter.end)}` : '';
+    return `?action=list&table=${encodeURIComponent(s.table)}&page=${page}&per_page=${perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}${filterQuery}${periodQuery}`;
   }
 
   async function fetchAllWindowRows(win) {
@@ -375,18 +381,30 @@
     let pages = 1;
     let moneyColumns = [];
     let currency = 'TL';
+    let totals = {};
+    let numericColumns = [];
     do {
-      const data = win.kind === 'production_list'
+      const data = ['production_list', 'production_report'].includes(win.kind)
         ? await productionApi(dataUrlForWindow(win, page, 1000))
         : await api(dataUrlForWindow(win, page, 1000));
       columns = data.columns;
       moneyColumns = data.money_columns || [];
       currency = data.currency || currency;
+      totals = data.totals || totals;
+      numericColumns = data.numeric_columns || numericColumns;
       rows.push(...data.rows);
       pages = data.pages;
       page += 1;
     } while (page <= pages);
-    return {columns, rows, money_columns: moneyColumns, currency};
+    return {columns, rows, money_columns: moneyColumns, currency, totals, numeric_columns:numericColumns};
+  }
+
+  function reportTotalRow(data) {
+    if (!data.totals || Object.keys(data.totals).length === 0 || !data.columns?.length) return null;
+    const row={};
+    data.columns.forEach(column=>{row[column]=Object.prototype.hasOwnProperty.call(data.totals,column)?data.totals[column]:'';});
+    row[data.columns[0]]='TOPLAM';
+    return row;
   }
 
   const safeFilename = title => String(title).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim() || 'tablo';
@@ -399,7 +417,9 @@
     try {
       const data = await fetchAllWindowRows(win);
       const {columns, rows} = data;
-      const csv = '\uFEFF' + [columns.map(csvCell).join(';'), ...rows.map(row => columns.map(column => csvCell(displayedCellValue(data, column, row[column]))).join(';'))].join('\r\n');
+      const totalRow=reportTotalRow(data);
+      const exportRows=totalRow?[...rows,totalRow]:rows;
+      const csv = '\uFEFF' + [columns.map(csvCell).join(';'), ...exportRows.map(row => columns.map(column => csvCell(displayedCellValue(data, column, row[column]))).join(';'))].join('\r\n');
       const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
       const link = document.createElement('a');
       link.href = url;
@@ -432,7 +452,8 @@
       const {columns, rows} = data;
       const moneyColumns = moneyColumnSet(data);
       const header = columns.map(column => `<th${moneyColumns.has(column) ? ' style="text-align:right"' : ''}>${escapeHtml(column)}</th>`).join('');
-      const body = rows.map(row => `<tr>${columns.map(column => `<td${moneyColumns.has(column) ? ' style="text-align:right;white-space:nowrap"' : ''}>${escapeHtml(displayedCellValue(data, column, row[column]))}</td>`).join('')}</tr>`).join('');
+      const totalRow=reportTotalRow(data);
+      const body = rows.map(row => `<tr>${columns.map(column => `<td${moneyColumns.has(column) ? ' style="text-align:right;white-space:nowrap"' : ''}>${escapeHtml(displayedCellValue(data, column, row[column]))}</td>`).join('')}</tr>`).join('')+(totalRow?`<tr style="font-weight:bold;background:#dbeafe">${columns.map(column=>`<td${moneyColumns.has(column)?' style="text-align:right;white-space:nowrap"':''}>${escapeHtml(displayedCellValue(data,column,totalRow[column]))}</td>`).join('')}</tr>`:'');
       printTab.document.open();
       printTab.document.write(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>${escapeHtml(win.title)}</title><style>body{font-family:Arial,sans-serif;color:#0f172a;margin:24px}header{display:flex;align-items:center;gap:16px;margin-bottom:18px}h1{font-size:20px;margin:0;flex:1}button{border:1px solid #94a3b8;border-radius:5px;background:#fff;padding:8px 14px;cursor:pointer}table{width:100%;border-collapse:collapse;font-size:10px}th,td{border:1px solid #cbd5e1;padding:5px;text-align:left;vertical-align:top}th{background:#e2e8f0}tr:nth-child(even){background:#f8fafc}@media print{body{margin:0}header button{display:none}thead{display:table-header-group}tr{break-inside:avoid}}</style></head><body><header><h1>${escapeHtml(win.title)}</h1><span>${rows.length.toLocaleString('tr-TR')} kayıt</span><button type="button" onclick="window.print()">Yazdır / PDF</button></header><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></body></html>`);
       printTab.document.close();
@@ -449,18 +470,20 @@
     win.body.querySelector('[data-print]').onclick = event => printWindowTable(win, event.currentTarget);
   }
 
-  async function openTable(table, label, filter = null, relationshipContext = null, restoredState = null) {
+  async function openTable(table, label, filter = null, relationshipContext = null, restoredState = null, periodFilter = null) {
+    periodFilter = periodFilter || restoredState?.periodFilter || null;
     const filterKey = filter ? `:${filter.column}:${filter.value}` : '';
+    const periodKey = periodFilter ? `:${periodFilter.start}:${periodFilter.end}` : '';
     const relationshipTitle = relationshipContext?.title || '';
     const context = relationshipTitle ? `${relationshipTitle} (#${filter.value})` : `#${filter?.value}`;
-    const windowTitle = filter ? `${label} — ${context}` : label;
-    const win = createWindow(`table:${table}${filterKey}`, windowTitle, 960, 620, {relationship: Boolean(filter)});
+    const windowTitle = filter ? `${label} — ${context}` : periodFilter ? `${label} — ${periodFilter.start} / ${periodFilter.end}` : label;
+    const win = createWindow(`table:${table}${filterKey}${periodKey}`, windowTitle, 960, 620, {relationship: Boolean(filter || periodFilter)});
     if (win.loaded) return win;
     win.loaded = true;
     win.kind = 'table';
-    win.state = {...{page: 1, perPage: 250, q: '', sort: 'ID', dir: 'desc'}, ...(restoredState || {}), table, label, filter, titleLookup: relationshipContext?.lookup || restoredState?.titleLookup || null};
+    win.state = {...{page: 1, perPage: 250, q: '', sort: 'ID', dir: 'desc'}, ...(restoredState || {}), table, label, filter, periodFilter, titleLookup: relationshipContext?.lookup || restoredState?.titleLookup || null};
     scheduleSaveOpenWindows();
-    win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button" data-new>＋ Yeni</button><button class="toolbar-button" data-refresh>↻ Yenile</button><button class="toolbar-button" data-export>⇩ Excel</button><button class="toolbar-button" data-print>▧ Yazdır / PDF</button>${filter ? `<span class="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">${escapeHtml(filter.column)} = #${escapeHtml(filter.value)}</span>` : ''}<div class="ml-auto relative"><input class="form-input w-72 pr-9" data-search placeholder="Ara…"><span class="absolute right-3 top-2 text-slate-400">⌕</span></div></div><div class="min-h-0 flex-1 overflow-auto bg-white" data-grid></div><div class="flex h-11 shrink-0 items-center gap-3 border-t border-slate-300 bg-slate-100 px-3 text-sm"><span data-summary class="whitespace-nowrap text-slate-500"></span><label class="flex items-center gap-1 whitespace-nowrap text-xs text-slate-600">Satır <select data-per-page class="rounded border border-slate-300 bg-white px-2 py-1 text-xs"><option value="50">50</option><option value="100">100</option><option value="250" selected>250</option><option value="500">500</option><option value="1000">1000</option></select></label><span data-join-legend class="hidden text-xs text-blue-700">* İlişkili tablodan gösterilen değer</span><div class="ml-auto flex items-center gap-2"><button class="toolbar-button h-8" data-prev>←</button><span data-page></span><button class="toolbar-button h-8" data-next>→</button></div></div></div>`;
+    win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button" data-new>＋ Yeni</button><button class="toolbar-button" data-refresh>↻ Yenile</button><button class="toolbar-button" data-export>⇩ Excel</button><button class="toolbar-button" data-print>▧ Yazdır / PDF</button>${filter ? `<span class="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800">${escapeHtml(filter.column)} = #${escapeHtml(filter.value)}</span>` : ''}${periodFilter ? `<span class="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800">${escapeHtml(periodFilter.start)} → ${escapeHtml(periodFilter.end)}</span>` : ''}<div class="ml-auto relative"><input class="form-input w-72 pr-9" data-search placeholder="Ara…"><span class="absolute right-3 top-2 text-slate-400">⌕</span></div></div><div class="min-h-0 flex-1 overflow-auto bg-white" data-grid></div><div class="flex h-11 shrink-0 items-center gap-3 border-t border-slate-300 bg-slate-100 px-3 text-sm"><span data-summary class="whitespace-nowrap text-slate-500"></span><label class="flex items-center gap-1 whitespace-nowrap text-xs text-slate-600">Satır <select data-per-page class="rounded border border-slate-300 bg-white px-2 py-1 text-xs"><option value="50">50</option><option value="100">100</option><option value="250" selected>250</option><option value="500">500</option><option value="1000">1000</option></select></label><span data-join-legend class="hidden text-xs text-blue-700">* İlişkili tablodan gösterilen değer</span><div class="ml-auto flex items-center gap-2"><button class="toolbar-button h-8" data-prev>←</button><span data-page></span><button class="toolbar-button h-8" data-next>→</button></div></div></div>`;
     const search = win.body.querySelector('[data-search]');
     let searchTimer;
     search.value = win.state.q;
@@ -480,15 +503,25 @@
     grid.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">Kayıtlar yükleniyor…</div>';
     try {
       const s = win.state;
-      const filterQuery = s.filter ? `&filter_column=${encodeURIComponent(s.filter.column)}&filter_value=${encodeURIComponent(s.filter.value)}` : '';
-      const data = await api(`?action=list&table=${encodeURIComponent(s.table)}&page=${s.page}&per_page=${s.perPage}&q=${encodeURIComponent(s.q)}&sort=${encodeURIComponent(s.sort)}&dir=${s.dir}${filterQuery}`);
+      const data = await api(dataUrlForWindow(win,s.page,s.perPage));
       s.pages = data.pages;
       s.perPage = data.per_page;
       const joinedColumns = new Set(data.joined_columns || []);
       const moneyColumns = moneyColumnSet(data);
+      const openPrimaryRow = (row, rowId) => {
+        const invoiceId = invoiceIdForTableRow(s.table, row);
+        if (invoiceId > 0) openInvoice(invoiceId);
+        else openEditor(s.table, s.label, Number(rowId), win);
+      };
+      const actionsForRow = row => {
+        const invoiceId = invoiceIdForTableRow(s.table, row);
+        const primary = {action: {label: invoiceId > 0 ? 'Faturayı Aç' : 'Kaydı Aç'}, primary: true};
+        const relations = (data.row_actions || []).map((action, index) => ({action, index, value: row[`__raw_${action.value}`], title: row[`__title_${action.value}`]})).filter(item => item.value !== null && item.value !== '' && String(item.value) !== '0');
+        return [primary, ...relations];
+      };
       const header = data.columns.map(column => `<th data-sort="${escapeHtml(column)}" title="${joinedColumns.has(column) ? 'İlişkili tablodan gösterilen değer' : ''}" class="sticky top-0 cursor-pointer whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 ${moneyColumns.has(column) ? 'text-right' : 'text-left'} text-xs font-semibold text-slate-700 hover:bg-slate-300">${escapeHtml(column)}${joinedColumns.has(column) ? '<span class="ml-0.5 text-blue-700">*</span>' : ''}${data.sort === column ? (data.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
       const rows = data.rows.map((row, rowIndex) => {
-        const availableActions = (data.row_actions || []).map((action, index) => ({action, index, value: row[`__raw_${action.value}`], title: row[`__title_${action.value}`]})).filter(item => item.value !== null && item.value !== '' && String(item.value) !== '0');
+        const availableActions = actionsForRow(row);
         const actionCell = `<td class="sticky left-0 z-10 w-4 border-r border-slate-200 bg-slate-50 px-2 py-1 text-xs"><button type="button" data-row-action-trigger="${rowIndex}" class="w-full select-none rounded border border-slate-300 bg-white px-2 py-1 text-center font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-400" ${availableActions.length ? '' : 'disabled'}>+</button></td>`;
         return `<tr data-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50">${actionCell}${data.columns.map(column => { const rawValue = row[column]; const value = moneyColumns.has(column) ? formatMoney(rawValue, data.currency) : String(rawValue ?? ''); const stateClass = joinedColumns.has(column) && value.startsWith('Silinmiş kayıt') ? ' font-medium italic text-red-700' : joinedColumns.has(column) && value === '—' ? ' text-slate-400' : ''; const moneyClass = moneyColumns.has(column) ? ' text-right tabular-nums' : ''; return `<td class="max-w-72 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${stateClass}${moneyClass}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`;
       }).join('');
@@ -498,16 +531,17 @@
         const row = data.rows[rowIndex];
         const invoiceId = invoiceIdForTableRow(s.table, row);
         if (invoiceId > 0) tableRow.title = 'Çift tıklayın: faturayı aç';
-        tableRow.ondblclick = () => {
-          if (invoiceId > 0) openInvoice(invoiceId);
-          else openEditor(s.table, s.label, Number(tableRow.dataset.id), win);
-        };
+        tableRow.ondblclick = () => openPrimaryRow(row, tableRow.dataset.id);
       });
       grid.querySelectorAll('[data-row-action-trigger]').forEach(trigger => trigger.onclick = event => {
         event.preventDefault(); event.stopPropagation();
         const row = data.rows[Number(trigger.dataset.rowActionTrigger)];
-        const items = (data.row_actions || []).map((action, index) => ({action, index, value: row[`__raw_${action.value}`], title: row[`__title_${action.value}`]})).filter(item => item.value !== null && item.value !== '' && String(item.value) !== '0');
+        const items = actionsForRow(row);
         openRelationMenu(trigger, items, item => {
+          if (item.primary) {
+            openPrimaryRow(row, row.ID);
+            return;
+          }
           const context = {title: item.title, lookup: item.action.title_lookup ? {...item.action.title_lookup, id: item.value} : null};
           if (item.action.report) openReport(item.action.report, item.value, item.action.label, context);
           else if (item.action.target === 'faturabaslik' && item.action.filter === 'ID') openInvoice(item.value);
@@ -628,7 +662,7 @@
       const moneyColumns = moneyColumnSet(data);
       const header = data.columns.map(column => `<th data-sort="${escapeHtml(column)}" class="sticky top-0 cursor-pointer whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 ${moneyColumns.has(column) ? 'text-right' : 'text-left'} text-xs font-semibold text-slate-700 hover:bg-slate-300">${escapeHtml(column)}${data.sort === column ? (data.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
       const rows = data.rows.map(row => `<tr data-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50">${data.columns.map(column => { const value=moneyColumns.has(column)?formatMoney(row[column],data.currency):String(row[column]??''); return `<td class="max-w-80 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${moneyColumns.has(column)?' text-right tabular-nums':''}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`).join('');
-      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Satış kaydı bulunamadı.</td></tr>`}</tbody></table>`;
+      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Satış kaydı bulunamadı.</td></tr>`}</tbody>${reportTotalsFooter(data)}</table>`;
       grid.querySelectorAll('th[data-sort]').forEach(th => th.onclick = () => { const name = th.dataset.sort; s.dir = s.sort === name && s.dir === 'asc' ? 'desc' : 'asc'; s.sort = name; s.page = 1; scheduleSaveOpenWindows(); loadReport(win); });
       grid.querySelectorAll('tr[data-id]').forEach((reportRow, rowIndex) => {
         const invoiceId = Number(data.rows[rowIndex]?.__faturaID || 0);
@@ -655,6 +689,20 @@
     if (!Number.isFinite(number)) return escapeHtml(value);
     return number.toLocaleString('tr-TR', {minimumFractionDigits: Number.isInteger(number) ? 0 : 2, maximumFractionDigits: 2});
   };
+
+  function reportTotalsFooter(data, leadingCells = 0) {
+    const totalRow=reportTotalRow(data);
+    if(!totalRow)return '';
+    const moneyColumns=moneyColumnSet(data),numericColumns=new Set(data.numeric_columns||Object.keys(data.totals||{}));
+    const leading=Array.from({length:leadingCells},()=>'<td class="sticky bottom-0 border-r border-blue-300 bg-blue-100 px-2 py-2"></td>').join('');
+    const cells=data.columns.map((column,index)=>{
+      const raw=totalRow[column];
+      const value=index===0?'TOPLAM':raw===''?'':moneyColumns.has(column)?formatMoney(raw,data.currency):numericColumns.has(column)?reportNumber(raw):String(raw??'');
+      const align=moneyColumns.has(column)||numericColumns.has(column)?' text-right tabular-nums':' text-left';
+      return `<td class="sticky bottom-0 whitespace-nowrap border-t-2 border-r border-blue-300 bg-blue-100 px-3 py-2 text-xs font-bold text-blue-950${align}">${escapeHtml(value)}</td>`;
+    }).join('');
+    return `<tfoot><tr>${leading}${cells}</tr></tfoot>`;
+  }
 
   function renderBusinessChart(container, data) {
     const series = data.chart_series || [];
@@ -718,6 +766,31 @@
     return win;
   }
 
+  const executivePeriodSections = [
+    {table:'faturabaslik',label:'Faturalar'},
+    {table:'kasa',label:'Kasa Hareketleri'},
+    {table:'banka_kasa',label:'Banka Hareketleri'},
+    {table:'hesaplar',label:'Banka Hesapları'},
+    {table:'kategoriler',label:'Finans Kategorileri'},
+    {table:'cek_senet_kasa',label:'Çek / Senet'},
+  ];
+
+  function executivePeriodRange(period, grouping) {
+    const value=String(period||'');
+    if(grouping==='daily'&&/^\d{4}-\d{2}-\d{2}$/.test(value)) return {start:value,end:value};
+    const match=value.match(/^(\d{4})-(\d{2})$/);
+    if(!match) return null;
+    const year=Number(match[1]),month=Number(match[2]);
+    const lastDay=new Date(Date.UTC(year,month,0)).getUTCDate();
+    return {start:value+'-01',end:`${value}-${String(lastDay).padStart(2,'0')}`};
+  }
+
+  function openExecutivePeriodSection(section, period, grouping) {
+    const range=executivePeriodRange(period,grouping);
+    if(!range){toast('Rapor dönemi açılamadı.','error');return;}
+    openTable(section.table,section.label,null,null,null,range);
+  }
+
   async function loadBusinessReport(win) {
     const grid=win.body.querySelector('[data-grid]');
     grid.innerHTML='<div class="p-8 text-center text-sm text-slate-500">Rapor hazırlanıyor…</div>';
@@ -729,10 +802,22 @@
       win.body.querySelector('[data-range-label]').textContent=`${data.range.start} → ${data.range.end}`;
       win.body.querySelector('[data-start]').value=s.start;win.body.querySelector('[data-end]').value=s.end;
       const moneyColumns=moneyColumnSet(data);
+      const hasExecutiveDrilldown=s.report==='executive_overview';
       const header=data.columns.map(column=>`<th data-sort="${escapeHtml(column)}" class="sticky top-0 cursor-pointer whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 ${moneyColumns.has(column)?'text-right':'text-left'} text-xs font-semibold text-slate-700 hover:bg-slate-300">${escapeHtml(column)}${data.sort===column?(data.dir==='asc'?' ↑':' ↓'):''}</th>`).join('');
-      const rows=data.rows.map(row=>`<tr class="border-b border-slate-200 hover:bg-blue-50">${data.columns.map(column=>{const value=moneyColumns.has(column)?formatMoney(row[column],data.currency):(typeof row[column]==='number'?reportNumber(row[column]):String(row[column]??''));return `<td class="max-w-80 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${moneyColumns.has(column)?' text-right tabular-nums':''}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;}).join('')}</tr>`).join('');
-      grid.innerHTML=`<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows||`<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Seçilen aralıkta veri bulunamadı.</td></tr>`}</tbody></table>`;
+      const rows=data.rows.map((row,rowIndex)=>`<tr ${hasExecutiveDrilldown?`data-executive-period="${escapeHtml(row['Dönem']||'')}" title="Çift tıklayın: dönemin faturalarını aç"`:''} class="${hasExecutiveDrilldown?'cursor-pointer ':''}border-b border-slate-200 hover:bg-blue-50">${hasExecutiveDrilldown?`<td class="sticky left-0 z-10 w-4 border-r border-slate-200 bg-slate-50 px-2 py-1 text-xs"><button type="button" data-executive-row-action="${rowIndex}" class="w-full select-none rounded border border-slate-300 bg-white px-2 py-1 text-center font-medium text-blue-700 hover:bg-blue-50">+</button></td>`:''}${data.columns.map(column=>{const value=moneyColumns.has(column)?formatMoney(row[column],data.currency):(typeof row[column]==='number'?reportNumber(row[column]):String(row[column]??''));return `<td class="max-w-80 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${moneyColumns.has(column)?' text-right tabular-nums':''}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;}).join('')}</tr>`).join('');
+      grid.innerHTML=`<table class="min-w-full border-collapse"><thead><tr>${hasExecutiveDrilldown?'<th class="sticky left-0 top-0 z-30 border-b border-r border-slate-300 bg-slate-200 px-2 py-2"></th>':''}${header}</tr></thead><tbody>${rows||`<tr><td colspan="${data.columns.length+(hasExecutiveDrilldown?1:0)}" class="p-10 text-center text-sm text-slate-500">Seçilen aralıkta veri bulunamadı.</td></tr>`}</tbody>${reportTotalsFooter(data,hasExecutiveDrilldown?1:0)}</table>`;
       grid.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const name=th.dataset.sort;s.dir=s.sort===name&&s.dir==='asc'?'desc':'asc';s.sort=name;s.page=1;scheduleSaveOpenWindows();loadBusinessReport(win);});
+      if(hasExecutiveDrilldown){
+        grid.querySelectorAll('[data-executive-period]').forEach(row=>row.ondblclick=()=>openExecutivePeriodSection(executivePeriodSections[0],row.dataset.executivePeriod,s.grouping));
+        grid.querySelectorAll('[data-executive-row-action]').forEach(trigger=>trigger.onclick=event=>{
+          event.preventDefault();event.stopPropagation();
+          const row=data.rows[Number(trigger.dataset.executiveRowAction)];
+          const period=row['Dönem'];
+          const items=executivePeriodSections.map(section=>({action:{label:section.label},section}));
+          openRelationMenu(trigger,items,item=>openExecutivePeriodSection(item.section,period,s.grouping));
+        });
+        grid.addEventListener('scroll',closeRelationMenu,{passive:true});
+      }
       const hasChart=renderBusinessChart(win.body.querySelector('[data-chart]'),data);
       updateBusinessChartVisibility(win,hasChart);
       const first=data.total===0?0:(data.page-1)*data.per_page+1,last=data.total===0?0:first+data.rows.length-1;
@@ -844,13 +929,27 @@
       const record = recordData.record;
       const fields = metadata.fields.map(field => `<div class="block ${/longtext|text/i.test(field.type) ? 'md:col-span-2' : ''}" data-field="${escapeHtml(field.name)}"><span class="mb-1 flex items-center gap-2 text-xs font-semibold text-slate-600"><span>${escapeHtml(field.name)}</span><span class="font-normal text-slate-400">${escapeHtml(field.type)}</span>${field.nullable ? '' : '<span class="text-red-500">*</span>'}</span>${inputForField(field, record[field.name], table)}${field.comment ? `<span class="mt-1 block text-xs text-slate-400">${escapeHtml(field.comment)}</span>` : ''}</div>`).join('');
       const deleteButton = id && ['adresdefteri', 'asp_urun'].includes(table) ? '<button class="toolbar-button bg-red-600 text-white hover:bg-red-700" type="button" data-delete-record>⌫ Sil</button>' : '';
-      win.body.innerHTML = `<form class="flex h-full flex-col" data-editor><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button bg-blue-600 text-white hover:bg-blue-700" type="submit">✓ Kaydet</button><button class="toolbar-button" type="button" data-close>İptal</button>${deleteButton}${metadata.transactional ? '<span class="ml-auto rounded bg-amber-100 px-2 py-1 text-xs text-amber-800">İşlem tablosu: dikkatli düzenleyin</span>' : ''}</div><div class="min-h-0 flex-1 overflow-auto p-4"><div class="grid grid-cols-1 gap-4 md:grid-cols-2">${fields}</div></div></form>`;
+      const editorActions = id && table === 'adresdefteri' ? (metadata.row_actions || []).map((action, index) => {
+        const value = action.value === 'ID' ? id : record[action.value];
+        return value !== null && value !== '' && String(value) !== '0' ? {...action, value, index} : null;
+      }).filter(Boolean) : [];
+      const shortcutBar = editorActions.length ? `<div class="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-slate-300 bg-blue-50 px-2 py-1.5"><span class="shrink-0 text-xs font-semibold text-blue-800">Bağlantılar</span>${editorActions.map((action, index) => `<button class="toolbar-button h-8 shrink-0" type="button" data-editor-shortcut="${index}">${escapeHtml(action.label)}</button>`).join('')}</div>` : '';
+      win.body.innerHTML = `<form class="flex h-full flex-col" data-editor><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button bg-blue-600 text-white hover:bg-blue-700" type="submit">✓ Kaydet</button><button class="toolbar-button" type="button" data-close>İptal</button>${deleteButton}${metadata.transactional ? '<span class="ml-auto rounded bg-amber-100 px-2 py-1 text-xs text-amber-800">İşlem tablosu: dikkatli düzenleyin</span>' : ''}</div>${shortcutBar}<div class="min-h-0 flex-1 overflow-auto p-4"><div class="grid grid-cols-1 gap-4 md:grid-cols-2">${fields}</div></div></form>`;
       const form = win.body.querySelector('form');
       await initializeRelations(form);
       if (table === 'adresdefteri') await initializeCariEditor(form);
       form.addEventListener('input', () => win.dirty = true);
       form.querySelector('[data-close]').onclick = () => closeWindow(win);
       if (form.querySelector('[data-delete-record]')) form.querySelector('[data-delete-record]').onclick = () => requestCascadeDelete(table, id, win);
+      form.querySelectorAll('[data-editor-shortcut]').forEach(button => button.onclick = async () => {
+        const action = editorActions[Number(button.dataset.editorShortcut)];
+        const title = String(record.FirmaAd || `${record.Ad || ''} ${record.Soyad || ''}`.trim() || `Kayıt #${id}`);
+        const titleLookup = action.title_lookup ? {...action.title_lookup, id:action.value} : null;
+        const context = titleLookup ? await resolveStoredRelationshipContext(titleLookup) : {title, lookup:null};
+        if (action.report) openReport(action.report, action.value, action.label, context);
+        else if (action.target === 'faturabaslik' && action.filter === 'ID') openInvoice(action.value);
+        else openTable(action.target, action.label, {column:action.filter, value:action.value}, context);
+      });
       form.onsubmit = async event => {
         event.preventDefault();
         const button = form.querySelector('[type="submit"]'); button.disabled = true; button.textContent = 'Kaydediliyor…';
@@ -934,6 +1033,62 @@
     return `<label class="block ${definition.type === 'textarea' ? 'md:col-span-2' : ''}"><span class="mb-1 block text-xs font-semibold text-slate-600">${label}${definition.required ? ' <span class="text-red-500">*</span>' : ''}</span>${control}</label>`;
   };
 
+  async function openProductionReport(report, label, restoredState = null) {
+    const win = createWindow(`production-report:${report}`, label, 1240, 760);
+    if (win.loaded) return win;
+    win.loaded = true;
+    win.kind = 'production_report';
+    win.state = {...{page:1,perPage:250,sort:'',dir:'asc',grouping:'monthly',preset:'this_year',start:'',end:'',chartExpanded:false}, ...(restoredState || {}), report, label};
+    scheduleSaveOpenWindows();
+    win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button" data-refresh>↻ Yenile</button><label class="text-xs text-slate-600">Görünüm <select class="rounded border border-slate-300 bg-white px-2 py-2 text-xs" data-grouping><option value="monthly">Aylık</option><option value="yearly">Yıllık</option></select></label><label class="text-xs text-slate-600">Aralık <select class="rounded border border-slate-300 bg-white px-2 py-2 text-xs" data-preset><option value="current_month">Bu ay</option><option value="last_month">Geçen ay</option><option value="last_3_months">Son 3 ay</option><option value="this_year">Bu yıl</option><option value="last_year">Geçen yıl</option><option value="custom">Serbest aralık</option></select></label><label class="hidden text-xs text-slate-600" data-custom-date>Başlangıç <input class="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs" type="date" data-start></label><label class="hidden text-xs text-slate-600" data-custom-date>Bitiş <input class="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs" type="date" data-end></label><span class="rounded-full border border-blue-300 bg-blue-50 px-3 py-1 text-xs text-blue-800" data-range-label></span><div class="ml-auto flex gap-2"><button class="toolbar-button" data-chart-toggle>▾ Grafiği göster</button><button class="toolbar-button" data-export>⇩ Excel</button><button class="toolbar-button" data-print>▧ Yazdır / PDF</button></div></div><div class="hidden shrink-0 border-b border-slate-300 bg-white" data-chart></div><div class="min-h-0 flex-1 overflow-auto bg-white" data-grid></div><div class="flex h-11 shrink-0 items-center gap-3 border-t border-slate-300 bg-slate-100 px-3 text-sm"><span data-summary class="whitespace-nowrap text-slate-500"></span><label class="flex items-center gap-1 whitespace-nowrap text-xs text-slate-600">Satır <select data-per-page class="rounded border border-slate-300 bg-white px-2 py-1 text-xs"><option value="50">50</option><option value="100">100</option><option value="250">250</option><option value="500">500</option><option value="1000">1000</option></select></label><div class="ml-auto flex items-center gap-2"><button class="toolbar-button h-8" data-prev>←</button><span data-page></span><button class="toolbar-button h-8" data-next>→</button></div></div></div>`;
+    const s = win.state;
+    const grouping = win.body.querySelector('[data-grouping]');
+    const preset = win.body.querySelector('[data-preset]');
+    const start = win.body.querySelector('[data-start]');
+    const end = win.body.querySelector('[data-end]');
+    grouping.value=s.grouping; preset.value=s.preset; start.value=s.start; end.value=s.end;
+    const toggleCustom=()=>win.body.querySelectorAll('[data-custom-date]').forEach(item=>item.classList.toggle('hidden',preset.value!=='custom'));
+    toggleCustom();
+    grouping.onchange=()=>{s.grouping=grouping.value;s.page=1;scheduleSaveOpenWindows();loadProductionReport(win);};
+    preset.onchange=()=>{s.preset=preset.value;s.page=1;toggleCustom();if(s.preset!=='custom'){s.start='';s.end='';loadProductionReport(win);}scheduleSaveOpenWindows();};
+    const customChanged=()=>{s.start=start.value;s.end=end.value;if(s.start&&s.end){s.page=1;scheduleSaveOpenWindows();loadProductionReport(win);}};
+    start.onchange=customChanged;end.onchange=customChanged;
+    win.body.querySelector('[data-refresh]').onclick=()=>loadProductionReport(win);
+    win.body.querySelector('[data-chart-toggle]').onclick=()=>{s.chartExpanded=!s.chartExpanded;updateBusinessChartVisibility(win,Boolean(win.body.querySelector('[data-chart]').innerHTML));scheduleSaveOpenWindows();};
+    initializeOutputButtons(win);
+    win.body.querySelector('[data-per-page]').value=String(s.perPage);
+    win.body.querySelector('[data-per-page]').onchange=event=>{s.perPage=Number(event.target.value);s.page=1;scheduleSaveOpenWindows();loadProductionReport(win);};
+    win.body.querySelector('[data-prev]').onclick=()=>{if(s.page>1){s.page--;scheduleSaveOpenWindows();loadProductionReport(win);}};
+    win.body.querySelector('[data-next]').onclick=()=>{if(s.page<(s.pages||1)){s.page++;scheduleSaveOpenWindows();loadProductionReport(win);}};
+    await loadProductionReport(win);
+    return win;
+  }
+
+  async function loadProductionReport(win) {
+    const grid=win.body.querySelector('[data-grid]');
+    grid.innerHTML='<div class="p-8 text-center text-sm text-slate-500">Rapor hazırlanıyor…</div>';
+    try {
+      const s=win.state;
+      const data=await productionApi(dataUrlForWindow(win,s.page,s.perPage));
+      s.pages=data.pages;s.perPage=data.per_page;s.sort=data.sort;s.dir=data.dir;s.preset=data.range.preset;s.start=data.range.start;s.end=data.range.end;
+      updateWindowTitle(win,`${data.title} — ${data.range.start} / ${data.range.end}`);
+      win.body.querySelector('[data-range-label]').textContent=`${data.range.start} → ${data.range.end}`;
+      win.body.querySelector('[data-start]').value=s.start;win.body.querySelector('[data-end]').value=s.end;
+      const numericColumns=new Set(data.columns.filter(column=>(data.rows||[]).some(row=>typeof row[column]==='number')));
+      const header=data.columns.map(column=>`<th data-sort="${escapeHtml(column)}" class="sticky top-0 cursor-pointer whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 ${numericColumns.has(column)?'text-right':'text-left'} text-xs font-semibold text-slate-700 hover:bg-slate-300">${escapeHtml(column)}${data.sort===column?(data.dir==='asc'?' ↑':' ↓'):''}</th>`).join('');
+      const rows=data.rows.map(row=>`<tr class="border-b border-slate-200 hover:bg-blue-50">${data.columns.map(column=>{const numeric=typeof row[column]==='number';const value=numeric?reportNumber(row[column]):String(row[column]??'');return `<td class="max-w-80 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${numeric?' text-right tabular-nums':''}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;}).join('')}</tr>`).join('');
+      grid.innerHTML=`<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows||`<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Seçilen aralıkta veri bulunamadı.</td></tr>`}</tbody>${reportTotalsFooter(data)}</table>`;
+      grid.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const name=th.dataset.sort;s.dir=s.sort===name&&s.dir==='asc'?'desc':'asc';s.sort=name;s.page=1;scheduleSaveOpenWindows();loadProductionReport(win);});
+      const hasChart=renderBusinessChart(win.body.querySelector('[data-chart]'),data);
+      updateBusinessChartVisibility(win,hasChart);
+      const first=data.total===0?0:(data.page-1)*data.per_page+1,last=data.total===0?0:first+data.rows.length-1;
+      win.body.querySelector('[data-summary]').textContent=`${first.toLocaleString('tr-TR')}–${last.toLocaleString('tr-TR')} / ${data.total.toLocaleString('tr-TR')} satır`;
+      win.body.querySelector('[data-page]').textContent=`${data.page} / ${data.pages}`;
+      win.body.querySelector('[data-per-page]').value=String(data.per_page);
+      win.body.querySelector('[data-prev]').disabled=data.page<=1;win.body.querySelector('[data-next]').disabled=data.page>=data.pages;
+    } catch(error){grid.innerHTML=`<div class="p-8 text-center text-sm text-red-700">${escapeHtml(error.message)}</div>`;updateBusinessChartVisibility(win,false);}
+  }
+
   async function openProductionList(view = 'all', label = 'Üretim Projeleri', restoredState = null) {
     const win = createWindow(`production-list:${view}`, label, 1240, 720);
     if (win.loaded) return win;
@@ -966,10 +1121,24 @@
       const money = moneyColumnSet(data);
       const sortable = new Set(data.sortable_columns || []);
       const header = data.columns.map(column => `<th ${sortable.has(column) ? `data-sort="${escapeHtml(column)}"` : ''} class="sticky top-0 whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 ${sortable.has(column) ? 'cursor-pointer hover:bg-slate-300' : ''} ${money.has(column) ? 'text-right' : 'text-left'}">${escapeHtml(column)}${data.sort === column ? (data.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
-      const rows = data.rows.map(row => `<tr data-production-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50">${data.columns.map(column => { const value = money.has(column) ? formatMoney(row[column], data.currency) : String(row[column] ?? ''); const state = (column === 'CariBaglantisi' || column === 'UrunBaglantisi') && Number(row[column]) === 0 ? ' text-red-700' : ''; return `<td class="max-w-72 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${money.has(column) ? ' text-right tabular-nums' : ''}${state}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`).join('');
-      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length}" class="p-10 text-center text-sm text-slate-500">Üretim kaydı bulunamadı.</td></tr>`}</tbody></table>`;
+      const rows = data.rows.map((row, rowIndex) => `<tr data-production-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50"><td class="sticky left-0 z-10 w-4 border-r border-slate-200 bg-slate-50 px-2 py-1 text-xs"><button type="button" data-production-row-action="${rowIndex}" class="w-full select-none rounded border border-slate-300 bg-white px-2 py-1 text-center font-medium text-blue-700 hover:bg-blue-50">+</button></td>${data.columns.map(column => { const value = money.has(column) ? formatMoney(row[column], data.currency) : String(row[column] ?? ''); const state = (column === 'CariBaglantisi' || column === 'UrunBaglantisi') && Number(row[column]) === 0 ? ' text-red-700' : ''; return `<td class="max-w-72 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${money.has(column) ? ' text-right tabular-nums' : ''}${state}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`).join('');
+      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr><th class="sticky left-0 top-0 z-30 border-b border-r border-slate-300 bg-slate-200 px-2 py-2 text-left text-xs font-semibold"></th>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length + 1}" class="p-10 text-center text-sm text-slate-500">Üretim kaydı bulunamadı.</td></tr>`}</tbody></table>`;
       grid.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const name = th.dataset.sort; s.dir = s.sort === name && s.dir === 'asc' ? 'desc' : 'asc'; s.sort = name; s.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); });
       grid.querySelectorAll('[data-production-id]').forEach(row => row.ondblclick = () => openProductionProject(Number(row.dataset.productionId)));
+      grid.querySelectorAll('[data-production-row-action]').forEach(trigger => trigger.onclick = event => {
+        event.preventDefault(); event.stopPropagation();
+        const row = data.rows[Number(trigger.dataset.productionRowAction)];
+        const accounts = Array.isArray(row.__accounts) ? row.__accounts : [];
+        const items = [
+          {action:{label:'Üretim Kaydını Aç'}, primary:true},
+          ...accounts.map(account => ({action:{label:accounts.length === 1 ? 'Cari Kartlar' : `Cari Kartlar — ${account.name || `#${account.ID}`}`}, accountId:Number(account.ID)})),
+        ];
+        openRelationMenu(trigger, items, item => {
+          if (item.primary) openProductionProject(Number(row.ID));
+          else if (item.accountId > 0) openEditor('adresdefteri', 'Cari Kartlar', item.accountId, null);
+        });
+      });
+      grid.addEventListener('scroll', closeRelationMenu, {passive:true});
       const first = data.total ? (data.page - 1) * data.per_page + 1 : 0;
       const last = data.total ? first + data.rows.length - 1 : 0;
       win.body.querySelector('[data-summary]').textContent = `${first.toLocaleString('tr-TR')}–${last.toLocaleString('tr-TR')} / ${data.total.toLocaleString('tr-TR')} kayıt`;
@@ -1006,7 +1175,8 @@
       const groups = Object.entries(data.groups || {}).map(([group, fields], index) => `<details class="rounded border border-slate-300 bg-white" ${index < 3 ? 'open' : ''}><summary class="cursor-pointer bg-slate-100 px-3 py-2 text-sm font-semibold">${escapeHtml(group)}</summary><div class="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">${Object.entries(fields).map(([name, definition]) => productionInput(name, definition, record[name])).join('')}</div></details>`).join('');
       const accounts = (data.main_links?.accounts || []).map(account => `<div class="flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs"><strong>#${escapeHtml(account.ID)} — ${escapeHtml(account.name || 'Adsız cari')}</strong><span class="text-slate-500">${escapeHtml(account.eposta || '')}</span><button type="button" class="toolbar-button h-8 ml-auto" data-open-main-account="${escapeHtml(account.ID)}">Cariyi Aç</button><button type="button" class="toolbar-button h-8" data-open-main-products="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Ürünleri Aç</button><button type="button" class="toolbar-button h-8" data-open-author-sales="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Tüm Satışlar</button></div>`).join('');
       const products = (data.main_links?.products || []).map(product => `<tr class="border-t border-slate-200"><td class="p-2">#${escapeHtml(product.ID)}</td><td class="p-2">${escapeHtml(product.isbn || '')}</td><td class="p-2 font-medium">${escapeHtml(product.kitapadi || '')}</td><td class="p-2 text-right">${Number(product.metrics?.['Satış'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['İade'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['Yazara Verilen'] || 0).toLocaleString('tr-TR')}</td><td class="p-2"><button type="button" class="toolbar-button h-8" data-open-product-sales="${escapeHtml(product.ID)}" data-product-name="${escapeHtml(product.kitapadi || '')}">Satış Geçmişi</button></td></tr>`).join('');
-      const linksPanel = `<section class="rounded border border-blue-300 bg-white"><div class="space-y-2 p-2">${accounts || '<div class="rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">Bu e-posta ile eşleşen cari kart bulunamadı.</div>'}</div><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-100"><th class="p-2 text-left">ID</th><th class="p-2 text-left">ISBN</th><th class="p-2 text-left">Ürün</th><th class="p-2 text-right">Satış</th><th class="p-2 text-right">İade</th><th class="p-2 text-right">Yazara verilen</th><th></th></tr></thead><tbody>${products || '<tr><td colspan="7" class="p-5 text-center text-slate-500">Bağlı ürün bulunamadı.</td></tr>'}</tbody></table></div></section>`;
+      const placeholderEmail = String(record.YazarinEpostasi || '').trim().toLocaleLowerCase('tr-TR') === 'admin@ciniusyayinlari.com';
+      const linksPanel = placeholderEmail ? '' : `<section class="rounded border border-blue-300 bg-white"><div class="space-y-2 p-2">${accounts || '<div class="rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">Bu e-posta ile eşleşen cari kart bulunamadı.</div>'}</div><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-100"><th class="p-2 text-left">ID</th><th class="p-2 text-left">ISBN</th><th class="p-2 text-left">Ürün</th><th class="p-2 text-right">Satış</th><th class="p-2 text-right">İade</th><th class="p-2 text-right">Yazara verilen</th><th></th></tr></thead><tbody>${products || '<tr><td colspan="7" class="p-5 text-center text-slate-500">Bağlı ürün bulunamadı.</td></tr>'}</tbody></table></div></section>`;
       const showFinancialSummary = [data.summary?.cost, data.summary?.payment, data.summary?.balance].some(value => Number(value || 0) !== 0);
       const financialSummary = showFinancialSummary ? `<div class="flex items-center gap-5 overflow-x-auto whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"><span class="text-slate-600">Üretim maliyeti <strong class="ml-1 text-slate-900">${formatMoney(data.summary.cost,data.currency)}</strong></span><span class="text-emerald-700">Alınan ödeme <strong class="ml-1">${formatMoney(data.summary.payment,data.currency)}</strong></span><span class="text-amber-800">Kalan <strong class="ml-1">${formatMoney(data.summary.balance,data.currency)}</strong></span></div>` : '';
       const transactions = win.state.id ? `<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">${productionTransactionTable('expense', data.expenses || [], win.state.id, data.currency)}${productionTransactionTable('payment', data.payments || [], win.state.id, data.currency)}</div>` : '';
@@ -1077,6 +1247,8 @@
           win = await openCurrencySettings(s);
         } else if (descriptor.kind === 'production_list') {
           win = await openProductionList(s.view || 'all', s.label || 'Üretim Projeleri', s);
+        } else if (descriptor.kind === 'production_report' && s.report && s.label) {
+          win = await openProductionReport(s.report, s.label, s);
         } else if (descriptor.kind === 'production_project') {
           win = await openProductionProject(s.id || null, s);
         }
@@ -1094,6 +1266,7 @@
   document.querySelectorAll('[data-open-production-list]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList(button.dataset.openProductionList, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-production-new]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionProject(null); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-production-balances]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList('balances', 'Üretim Bakiyeleri'); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
+  document.querySelectorAll('[data-open-production-report]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionReport(button.dataset.openProductionReport, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('nav > .group > button').forEach(trigger => {
     trigger.addEventListener('click', event => {
       event.stopPropagation();

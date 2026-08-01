@@ -180,6 +180,12 @@ try {
             COALESCE(SUM(CASE WHEN fb.`FaturaTuru` = 1 THEN fd.`miktar` WHEN fb.`FaturaTuru` = 2 THEN -fd.`miktar` ELSE 0 END), 0) net_quantity,
             COALESCE(SUM(CASE WHEN fb.`FaturaTuru` = 1 THEN fd.`miktar` * fd.`urunEder` WHEN fb.`FaturaTuru` = 2 THEN -(fd.`miktar` * fd.`urunEder`) ELSE 0 END), 0) net_total" . $from . $where);
         $summaryStatement->execute($params);
+        $totalsStatement = db()->prepare("SELECT
+            COALESCE(SUM(fd.`miktar`),0) `miktar`,COALESCE(SUM(fd.`urunEder`),0) `urunEder`,
+            COALESCE(SUM(fd.`urunIndirim`),0) `urunIndirim`,COALESCE(SUM(fd.`urunKDV`),0) `urunKDV`,
+            COALESCE(SUM(fd.`urunKDVsizToplam`),0) `urunKDVsizToplam`,
+            COALESCE(SUM(ROUND(COALESCE(fd.`miktar`,0)*COALESCE(fd.`urunEder`,0),2)),0) `SatirToplami`" . $from . $where);
+        $totalsStatement->execute($params);
         $titleTable = $report === 'product_sales' ? 'asp_urun' : 'adresdefteri';
         $titleField = $report === 'product_sales' ? '`kitapadi`' : "COALESCE(NULLIF(`FirmaAd`, ''), NULLIF(TRIM(CONCAT_WS(' ', `Ad`, `Soyad`)), ''))";
         $titleStatement = db()->prepare('SELECT ' . $titleField . ' FROM ' . quoted_identifier($titleTable) . ' WHERE `ID` = ?');
@@ -198,6 +204,8 @@ try {
             'sort' => $sort,
             'dir' => strtolower($direction),
             'summary' => $summaryStatement->fetch(),
+            'totals' => $totalsStatement->fetch(),
+            'numeric_columns' => ['miktar','urunEder','urunIndirim','urunKDV','urunKDVsizToplam','SatirToplami'],
         ]);
     }
 
@@ -310,12 +318,32 @@ try {
                 'value_labels' => $config['value_labels'][$name] ?? null,
             ];
         }
+        $editorActions = [];
+        foreach ($relationships[$table] ?? [] as $editorAction) {
+            $valueField = $editorAction['value'] ?? 'ID';
+            if (!isset($columns[$valueField])) continue;
+            if (isset($editorAction['target'])) {
+                $target = $editorAction['target'];
+                $filter = $editorAction['filter'] ?? 'ID';
+                if (!isset($schema[$target]) || !isset(column_map($target)[$filter])) continue;
+            } elseif (!in_array($editorAction['report'] ?? '', ['product_sales', 'author_sales'], true)) {
+                continue;
+            }
+            if ($valueField === 'ID') {
+                $editorAction['title_lookup'] = ['table'=>$table, 'label'=>$config['name'] ?? 'ID'];
+            } elseif (isset($config['relations'][$valueField])) {
+                [$lookupTable, $lookupLabel] = $config['relations'][$valueField];
+                $editorAction['title_lookup'] = ['table'=>$lookupTable, 'label'=>$lookupLabel];
+            }
+            $editorActions[] = $editorAction;
+        }
         json_response([
             'table' => $table,
             'label' => $config['label'],
             'fields' => $fields,
             'list_columns' => array_values(array_filter($config['list'], fn ($name) => isset($columns[$name]))),
             'transactional' => (bool) ($config['transactional'] ?? false),
+            'row_actions' => $editorActions,
         ]);
     }
 
@@ -468,6 +496,26 @@ try {
             $whereParts[] = '`base`.' . quoted_identifier($filterColumn) . ' = ?';
             $params[] = (string) $filterValue;
         }
+        $periodStart = trim((string)($_GET['period_start'] ?? ''));
+        $periodEnd = trim((string)($_GET['period_end'] ?? ''));
+        if ($periodStart !== '' || $periodEnd !== '') {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $periodStart) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $periodEnd) || $periodStart > $periodEnd) {
+                json_response(['error'=>'Invalid period filter.'],422);
+            }
+            $periodCondition = match ($table) {
+                'faturabaslik' => '`base`.`FaturaTarih` >= ? AND `base`.`FaturaTarih` < DATE_ADD(?,INTERVAL 1 DAY)',
+                'kasa' => '`base`.`islemTarihi` >= ? AND `base`.`islemTarihi` < DATE_ADD(?,INTERVAL 1 DAY)',
+                'banka_kasa' => '`base`.`tarih` >= ? AND `base`.`tarih` < DATE_ADD(?,INTERVAL 1 DAY)',
+                'cek_senet_kasa' => '`base`.`bas_tarih` >= ? AND `base`.`bas_tarih` < DATE_ADD(?,INTERVAL 1 DAY)',
+                'hesaplar' => 'EXISTS (SELECT 1 FROM `banka_kasa` period_bank WHERE period_bank.`hesapID`=`base`.`ID` AND period_bank.`tarih` >= ? AND period_bank.`tarih` < DATE_ADD(?,INTERVAL 1 DAY))',
+                'kategoriler' => '(EXISTS (SELECT 1 FROM `kasa` period_cash WHERE period_cash.`KategoriID`=`base`.`ID` AND period_cash.`islemTarihi` >= ? AND period_cash.`islemTarihi` < DATE_ADD(?,INTERVAL 1 DAY)) OR EXISTS (SELECT 1 FROM `banka_kasa` period_bank_category WHERE period_bank_category.`kategoriID`=`base`.`ID` AND period_bank_category.`tarih` >= ? AND period_bank_category.`tarih` < DATE_ADD(?,INTERVAL 1 DAY)))',
+                default => null,
+            };
+            if ($periodCondition === null) json_response(['error'=>'This section does not support period filtering.'],422);
+            $whereParts[] = $periodCondition;
+            if ($table === 'kategoriler') array_push($params,$periodStart,$periodEnd,$periodStart,$periodEnd);
+            else array_push($params,$periodStart,$periodEnd);
+        }
         if ($query !== '' && ($searchColumns !== [] || $relationAliases !== [])) {
             foreach (database_search_terms($query) as $term) {
                 $parts = [];
@@ -519,6 +567,7 @@ try {
             'row_actions' => $rowActions,
             'title_column' => $titleColumn,
             'active_filter' => $filterColumn === '' ? null : ['column' => $filterColumn, 'value' => (string) $filterValue],
+            'active_period' => $periodStart === '' ? null : ['start'=>$periodStart,'end'=>$periodEnd],
             'page' => $page,
             'per_page' => $perPage,
             'total' => $total,

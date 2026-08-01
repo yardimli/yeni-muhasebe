@@ -20,6 +20,15 @@ try {
         json_response(['groups'=>production_available_field_groups(),'currency'=>setting_get('default_currency','TL')]);
     }
 
+    if ($action === 'report') {
+        $range = production_report_range((string)($_GET['preset']??'this_year'), $_GET['start']??null, $_GET['end']??null);
+        json_response(production_report_run(
+            (string)($_GET['report']??''), (string)($_GET['grouping']??'monthly'), $range,
+            max(1,(int)($_GET['page']??1)), (int)($_GET['per_page']??250),
+            (string)($_GET['sort']??''), (string)($_GET['dir']??'asc')
+        ));
+    }
+
     if ($action === 'detail') {
         json_response(production_detail(max(1,(int)($_GET['id']??0))));
     }

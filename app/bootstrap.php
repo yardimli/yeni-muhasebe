@@ -51,9 +51,17 @@ function users(): array
     return is_array($decoded) ? ($decoded['users'] ?? []) : [];
 }
 
+function environment_login_user(): ?array
+{
+    $username = trim((string)env_value('APP_LOGIN_USERNAME', ''));
+    $password = (string)env_value('APP_LOGIN_PASSWORD', '');
+    if ($username === '' || $password === '') return null;
+    return ['id'=>'environment', 'username'=>$username, 'password'=>$password, 'role'=>'administrator'];
+}
+
 function app_is_configured(): bool
 {
-    return count(users()) > 0;
+    return environment_login_user() !== null || count(users()) > 0;
 }
 
 function create_initial_user(string $username, string $password): void
@@ -80,6 +88,15 @@ function create_initial_user(string $username, string $password): void
 
 function attempt_login(string $username, string $password): bool
 {
+    $environmentUser = environment_login_user();
+    if ($environmentUser !== null
+        && hash_equals((string)$environmentUser['username'], trim($username))
+        && hash_equals((string)$environmentUser['password'], $password)) {
+        session_regenerate_id(true);
+        $_SESSION['user'] = ['id'=>$environmentUser['id'], 'username'=>$environmentUser['username'], 'role'=>$environmentUser['role']];
+        audit_log('login', null, null, ['source'=>'environment']);
+        return true;
+    }
     foreach (users() as $user) {
         if (hash_equals((string) $user['username'], trim($username)) && password_verify($password, (string) $user['password_hash'])) {
             session_regenerate_id(true);

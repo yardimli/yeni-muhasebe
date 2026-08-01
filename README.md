@@ -6,12 +6,12 @@ Invoice headers and invoice-linked rows open a composite invoice window containi
 
 ## Run locally
 
-1. Copy `.env.example` to `.env` and configure the database connection.
+1. Copy `.env.example` to `.env`, configure the database connection, and replace `APP_LOGIN_USERNAME` and `APP_LOGIN_PASSWORD` with private administrator credentials.
 2. Install and build the CSS: `npm install` then `npm run build`.
 3. Start PHP: `php -S 127.0.0.1:8080 -t public`.
-4. Open `http://127.0.0.1:8080` and create the first administrator account.
+4. Open `http://127.0.0.1:8080` and sign in using the credentials configured in `.env`.
 
-The initial administrator is stored as a password hash in `storage/users.json`. Database writes are recorded in `storage/audit.log`. Both files are excluded from Git.
+The environment-backed administrator is used as the default login. Existing administrators stored as password hashes in `storage/users.json` remain valid for backward compatibility. Database writes are recorded in `storage/audit.log`; both storage files are excluded from Git.
 
 ## Safety notes
 
