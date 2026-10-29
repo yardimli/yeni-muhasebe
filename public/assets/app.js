@@ -849,6 +849,9 @@
     }
     if (field.relation) {
       const [target, label] = field.relation;
+      if (table === 'asp_urun' && ['ureticiID', 'birimID', 'urunGrupID', 'CinYazarID'].includes(field.name)) {
+        return `<div class="flex items-center gap-3 py-2" data-product-lookup data-target="${escapeHtml(target)}" data-label="${escapeHtml(label)}" data-field-name="${name}" data-nullable="${field.nullable ? 'true' : 'false'}" data-missing="${escapeHtml(field.missing_label || 'Bağlantı bulunamadı')}"><input type="hidden" name="${name}" value="${escapeHtml(raw)}"><span class="min-w-0 flex-1 break-words text-sm" data-lookup-label>${raw && Number(raw) !== 0 ? escapeHtml(`#${raw}`) : 'Seçilmedi'}</span><button type="button" class="shrink-0 text-sm text-blue-700 underline" data-edit-lookup aria-label="${name} seçimini düzenle">Düzenle</button></div>`;
+      }
       return `<div class="relation-control relative" data-relation data-target="${escapeHtml(target)}" data-label="${escapeHtml(label)}" data-missing="${escapeHtml(field.missing_label || 'Bağlantı bulunamadı')}"><input type="hidden" name="${name}" value="${escapeHtml(raw)}"><input class="form-input" data-relation-search value="${raw ? escapeHtml(`#${raw}`) : ''}" placeholder="İsim veya ID ara…" autocomplete="off"><div class="absolute z-20 mt-1 hidden max-h-52 w-full overflow-auto rounded border border-slate-300 bg-white shadow-xl" data-options></div></div>`;
     }
     if (/longtext|text/i.test(field.type) || /varchar\(([3-9]\d\d|\d{4,})\)/i.test(field.type)) return `<textarea class="form-input min-h-24" name="${name}">${escapeHtml(raw)}</textarea>`;
@@ -899,7 +902,85 @@
     });
   }
 
+  function openProductLookup(control) {
+    const hidden = control.querySelector('input[type="hidden"]');
+    const label = control.querySelector('[data-lookup-label]');
+    const trigger = control.querySelector('[data-edit-lookup]');
+    const parentTitle = control.closest('.desktop-window').querySelector('[data-window-title]').textContent;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'product-lookup-dialog rounded-lg border border-slate-400 bg-white p-0 text-slate-900 shadow-2xl';
+    dialog.setAttribute('aria-labelledby', 'product-lookup-title');
+    dialog.innerHTML = `<div class="flex h-full flex-col"><header class="flex shrink-0 items-center gap-3 border-b border-slate-300 bg-slate-100 p-3"><div class="min-w-0 flex-1"><h2 id="product-lookup-title" class="font-semibold">${escapeHtml(control.dataset.fieldName)} — Seçim</h2><p class="truncate text-xs text-slate-500">${escapeHtml(parentTitle)}</p></div><button type="button" class="toolbar-button" data-cancel aria-label="Kapat">×</button></header><div class="shrink-0 p-3"><label class="text-sm">İsim veya ID ile filtrele<input type="search" class="form-input mt-1" data-search autocomplete="off"></label></div><div class="min-h-0 flex-1 overflow-auto border-y border-slate-200 p-2" data-options></div><p class="shrink-0 px-3 py-2 text-xs text-slate-500" role="status" aria-live="polite" data-status></p><footer class="flex shrink-0 flex-wrap items-center gap-2 p-3"><button type="button" class="toolbar-button" data-prev>← Önceki</button><button type="button" class="toolbar-button" data-next>Sonraki →</button><div class="ml-auto flex gap-2"><button type="button" class="toolbar-button" data-cancel>Vazgeç</button><button type="button" class="toolbar-button" data-choose disabled>Seç</button></div></footer></div>`;
+    const search = dialog.querySelector('[data-search]');
+    const options = dialog.querySelector('[data-options]');
+    const status = dialog.querySelector('[data-status]');
+    const choose = dialog.querySelector('[data-choose]');
+    const previous = dialog.querySelector('[data-prev]');
+    const next = dialog.querySelector('[data-next]');
+    let page = 1, selected = null, requestVersion = 0, timer, controller;
+    const load = async () => {
+      const version = ++requestVersion;
+      controller?.abort();
+      controller = new AbortController();
+      selected = null; choose.disabled = true; previous.disabled = true; next.disabled = true;
+      options.textContent = 'Yükleniyor…'; status.textContent = '';
+      try {
+        const data = await api(`?action=lookup&table=${encodeURIComponent(control.dataset.target)}&label=${encodeURIComponent(control.dataset.label)}&q=${encodeURIComponent(search.value.trim())}&page=${page}`, {signal:controller.signal});
+        if (!dialog.open || version !== requestVersion) return;
+        const items = [...(control.dataset.nullable === 'true' ? [{ID:'', label:'Seçilmedi'}] : []), ...data.options];
+        options.innerHTML = items.map((item, index) => `<label class="flex cursor-pointer items-center gap-3 rounded border-b border-slate-100 p-3 text-sm hover:bg-blue-50"><input type="radio" name="product-lookup-choice" value="${index}" ${String(item.ID) === hidden.value ? 'checked' : ''}><span>${escapeHtml(item.label || `#${item.ID}`)}</span>${item.ID !== '' ? `<span class="ml-auto text-xs text-slate-500">#${escapeHtml(item.ID)}</span>` : ''}</label>`).join('') || '<p class="p-3 text-sm text-slate-500">Sonuç yok.</p>';
+        const checked = options.querySelector('input:checked');
+        if (checked) { selected = items[Number(checked.value)]; choose.disabled = false; }
+        options.querySelectorAll('input').forEach(input => input.onchange = () => { selected = items[Number(input.value)]; choose.disabled = false; });
+        previous.disabled = page <= 1; next.disabled = !data.has_more;
+        status.textContent = `Sayfa ${page} · ${data.options.length} seçenek`;
+      } catch (error) {
+        if (version !== requestVersion || !dialog.open || error.name === 'AbortError') return;
+        options.textContent = 'Liste yüklenemedi.'; status.textContent = error.message;
+        previous.disabled = page <= 1;
+      }
+    };
+    search.oninput = () => {
+      clearTimeout(timer); controller?.abort(); ++requestVersion;
+      selected = null; choose.disabled = true; previous.disabled = true; next.disabled = true;
+      options.textContent = 'Yükleniyor…'; page = 1;
+      timer = setTimeout(load, 250);
+    };
+    previous.onclick = () => { page--; load(); };
+    next.onclick = () => { page++; load(); };
+    choose.onclick = () => {
+      if (!selected) return;
+      const changed = hidden.value !== String(selected.ID);
+      hidden.value = String(selected.ID);
+      label.textContent = selected.label || (selected.ID === '' ? 'Seçilmedi' : `#${selected.ID}`);
+      if (changed) hidden.dispatchEvent(new Event('input', {bubbles:true}));
+      dialog.close();
+    };
+    dialog.querySelectorAll('[data-cancel]').forEach(button => button.onclick = () => dialog.close());
+    dialog.addEventListener('close', () => {
+      clearTimeout(timer); controller?.abort(); ++requestVersion;
+      dialog.remove(); trigger.focus();
+    }, {once:true});
+    document.body.append(dialog);
+    dialog.showModal();
+    search.focus();
+    load();
+  }
+
   async function initializeRelations(container) {
+    container.querySelectorAll('[data-product-lookup]').forEach(async control => {
+      const hidden = control.querySelector('input[type="hidden"]');
+      const label = control.querySelector('[data-lookup-label]');
+      const initialValue = hidden.value;
+      control.querySelector('[data-edit-lookup]').onclick = () => openProductLookup(control);
+      if (!initialValue || Number(initialValue) === 0) return;
+      try {
+        const data = await api(`?action=lookup&table=${encodeURIComponent(control.dataset.target)}&label=${encodeURIComponent(control.dataset.label)}&id=${encodeURIComponent(initialValue)}`);
+        if (hidden.value === initialValue) label.textContent = data.options[0]?.label || `#${initialValue} — ${control.dataset.missing}`;
+      } catch (error) {
+        if (hidden.value === initialValue) label.textContent = `#${initialValue} — ${error.message}`;
+      }
+    });
     container.querySelectorAll('[data-relation]').forEach(async control => {
       const visible = control.querySelector('[data-relation-search]'), hidden = control.querySelector('input[type="hidden"]'), options = control.querySelector('[data-options]');
       const render = items => {

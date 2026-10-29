@@ -39,6 +39,24 @@ $data = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
 check_http($status === 200 && isset($data['users'], $data['menus']), 'User catalog failed.');
 check_http(!str_contains($body, 'password'), 'User catalog exposed password fields.');
 check_http(request('users_api.php', ['username'=>'must-not-be-created'])[0] === 419, 'User write accepted without CSRF.');
+foreach (['ureticiler'=>'uretici', 'birimler'=>'birim', 'urungruplari'=>'grup', 'adresdefteri'=>'FirmaAd'] as $table=>$label) {
+    $lookup = 'api.php?action=lookup&table=' . $table . '&label=' . $label;
+    [$status, $body] = request($lookup);
+    $first = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+    check_http($status === 200 && count($first['options']) <= 30 && is_bool($first['has_more']), 'Lookup list failed.');
+    if ($first['has_more']) {
+        [$status, $body] = request($lookup . '&page=2');
+        $second = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        check_http($status === 200 && $second['page'] === 2 && count($second['options']) > 0, 'Lookup pagination failed.');
+        check_http(array_intersect(array_column($first['options'],'ID'), array_column($second['options'],'ID')) === [], 'Lookup pages overlap.');
+    }
+    if ($first['options']) {
+        $id = $first['options'][0]['ID'];
+        [$status, $body] = request($lookup . '&id=' . $id);
+        $selected = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        check_http($status === 200 && count($selected['options']) === 1 && (string)$selected['options'][0]['ID'] === (string)$id, 'Selected lookup label failed.');
+    }
+}
 foreach (['cari', 'webcup'] as $source) {
     [$status, $csv] = request('email_export.php?source=' . $source);
     check_http($status === 200 && str_starts_with($csv, "Name,Email\r\n"), 'CSV export failed: ' . $source);

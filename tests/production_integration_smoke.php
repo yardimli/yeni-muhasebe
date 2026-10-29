@@ -20,7 +20,10 @@ foreach (['cinius_uretim','masraflar','odemeler'] as $table) {
 $list = production_list(1,50,'','all','ID','desc');
 assert_production(isset($list['rows'],$list['total'],$list['columns']), 'Production list response is incomplete.');
 assert_production(count($list['rows']) <= 50, 'Production list did not respect its page size.');
-assert_production(in_array('CariBaglantisi',$list['columns'],true), 'Main-account linkage column is missing.');
+foreach (['UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi'] as $hidden) {
+    assert_production(!in_array($hidden,$list['columns'],true), 'Old project column is still visible: ' . $hidden);
+}
+foreach (['Yapılan Ödeme','Son Ödeme Tarihi'] as $column) assert_production(in_array($column,$list['columns'],true), 'Outgoing payment column missing.');
 assert_production(in_array('UrunBaglantisi',$list['columns'],true), 'Main-product linkage column is missing.');
 
 $detailChecked = false;
@@ -32,7 +35,7 @@ if ($list['rows'] !== []) {
 }
 
 $source = file_get_contents(APP_ROOT . '/public/assets/app.js');
-$page = file_get_contents(APP_ROOT . '/public/index.php');
+$page = file_get_contents(APP_ROOT . '/app/access.php');
 assert_production(str_contains($source,'openProductionList') && str_contains($source,"descriptor.kind === 'production_project'"), 'Production window wiring or restoration is missing.');
 assert_production(str_contains($page,'data-open-production-list') && str_contains($page,'data-open-production-new'), 'Production menu wiring is missing.');
 

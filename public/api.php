@@ -329,6 +329,9 @@ try {
         }
         $editorActions = [];
         foreach ($relationships[$table] ?? [] as $editorAction) {
+            if ($table === 'adresdefteri' && in_array($editorAction['target'] ?? '', [
+                'cek_senet_kasa', 'cari_duzeltme_kayitlari', 'adresgruplari', 'ilceler', 'sehirler', 'ulkeler',
+            ], true)) continue;
             $valueField = $editorAction['value'] ?? 'ID';
             if (!isset($columns[$valueField])) continue;
             if (isset($editorAction['target'])) {
@@ -615,10 +618,13 @@ try {
             $params[] = '%' . $query . '%';
             $params[] = $query;
         }
-        $sql .= ' ORDER BY ' . quoted_identifier($labelColumn) . ' LIMIT 30';
+        $page = max(1, min(1000000, (int) ($_GET['page'] ?? 1)));
+        $offset = ($page - 1) * 30;
+        $sql .= ' ORDER BY ' . quoted_identifier($labelColumn) . ', `ID` LIMIT 31 OFFSET ' . $offset;
         $statement = db()->prepare($sql);
         $statement->execute($params);
-        json_response(['options' => $statement->fetchAll()]);
+        $options = $statement->fetchAll();
+        json_response(['options' => array_slice($options, 0, 30), 'page'=>$page, 'has_more'=>count($options)>30]);
     }
 
     if ($action === 'locations' && $table === 'adresdefteri') {
