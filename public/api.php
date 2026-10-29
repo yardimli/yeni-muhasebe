@@ -22,6 +22,7 @@ function table_config(array $schema, string $table): array
     if (!isset($schema[$table])) {
         json_response(['error' => 'Unknown or unavailable section.'], 404);
     }
+    if (($_GET['action'] ?? '') !== 'lookup' || !can_lookup($table, (string)($_GET['label'] ?? ''))) require_permission('table:' . $table);
     return $schema[$table];
 }
 
@@ -70,10 +71,13 @@ try {
     if ($action === 'catalog') {
         $catalog = [];
         foreach ($schema as $name => $config) {
+            if (!can_access('table:' . $name)) continue;
             $catalog[$name] = ['label' => $config['label'], 'group' => $config['group']];
         }
         json_response(['tables' => $catalog, 'csrf' => csrf_token()]);
     }
+
+    if (in_array($action, ['settings', 'save_settings'], true)) require_permission('settings:currency');
 
     if ($action === 'settings' && (string) ($_GET['section'] ?? '') === 'currency') {
         json_response([
@@ -100,6 +104,7 @@ try {
 
     if ($action === 'business_report') {
         $reportId = (string) ($_GET['report'] ?? '');
+        require_permission('report:' . $reportId);
         $grouping = (string) ($_GET['grouping'] ?? 'monthly');
         $range = business_report_range(
             (string) ($_GET['preset'] ?? 'this_year'),
@@ -119,6 +124,7 @@ try {
 
     if ($action === 'report') {
         $report = (string) ($_GET['report'] ?? '');
+        require_permission('table:' . ($report === 'product_sales' ? 'asp_urun' : 'adresdefteri'));
         if (!in_array($report, ['product_sales', 'author_sales'], true)) {
             json_response(['error' => 'Unknown relationship report.'], 404);
         }
@@ -210,6 +216,7 @@ try {
     }
 
     if ($action === 'delete_preview') {
+        require_permission('table:' . $table);
         $id = max(0, (int) ($_GET['id'] ?? 0));
         json_response(cascade_delete_preview($table, $id));
     }
@@ -218,11 +225,13 @@ try {
         verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
         $payload = request_json();
         $deleteTable = (string) ($payload['table'] ?? $table);
+        require_permission('table:' . $deleteTable);
         $id = max(0, (int) ($payload['id'] ?? 0));
         json_response(cascade_execute_delete($deleteTable, $id));
     }
 
     if ($action === 'invoice') {
+        require_permission('table:faturabaslik');
         $invoiceId = max(0, (int) ($_GET['id'] ?? 0));
         if ($invoiceId < 1) {
             json_response(['error' => 'A valid invoice ID is required.'], 422);

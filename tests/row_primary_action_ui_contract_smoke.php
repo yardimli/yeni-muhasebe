@@ -10,7 +10,7 @@ foreach ([
     'tableRow.ondblclick = () => openPrimaryRow',
     'if (item.primary)',
     'data-production-row-action',
-    "label:'Üretim Kaydını Aç'",
+    "label:'WebCin Kaydını Aç'",
     "accounts.map(account =>",
     "openEditor('adresdefteri', 'Cari Kartlar', item.accountId, null)",
 ] as $contract) {

@@ -13,6 +13,12 @@ Invoice headers and invoice-linked rows open a composite invoice window containi
 
 The environment-backed administrator is used as the default login. Existing administrators stored as password hashes in `storage/users.json` remain valid for backward compatibility. Database writes are recorded in `storage/audit.log`; both storage files are excluded from Git.
 
+Administrators can create and edit accounts under **Kullanıcılar → Kullanıcı Yönetimi**. Passwords require at least 12 characters; leave the password blank when editing to preserve it. The `.env` account and the original local administrator (ID 1) cannot be demoted. The environment account's credentials are edited in `.env`.
+
+For regular users, select both a main menu and its permitted items. Administrators always see all menus. Account roles and permissions are reread on every request, and API access is checked on the server. Related dropdown labels remain available when needed by an authorized editor. Refresh an already open desktop after changing its permissions to update its navigation; restored windows are filtered by the current permissions. The PHP process needs write access to `storage/users.json` and its directory.
+
+**WebCin** is the first menu. **Pencere → Tümünü Kapat** closes all windows, including minimized ones, after a single confirmation if there are unsaved edits. **Raporlar → E-postaları Dışa Aktar** downloads all Cari or WebCup project email addresses as UTF-8 CSV (`Name,Email`). Exports split multiple addresses, deduplicate case-insensitively, skip invalid addresses and the application's known placeholder address, and protect spreadsheet formula-like names.
+
 ## Safety notes
 
 - Legacy databases may use MyISAM. Cleanup tab 9 previews and converts remaining MyISAM base tables to InnoDB; it does not create foreign keys automatically.

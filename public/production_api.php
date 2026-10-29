@@ -7,7 +7,23 @@ require_auth();
 
 $action = (string)($_GET['action'] ?? '');
 
+function require_project_access(int $id): void
+{
+    if (can_access('production:all') || can_access('production:balances')) return;
+    if (can_access('production:new') && in_array($id, $_SESSION['created_webcin_projects'] ?? [], true)) return;
+    require_permission('production:all');
+}
+
 try {
+    $permission = match ($action) {
+        'list' => 'production:all',
+        'balances' => 'production:balances',
+        'report' => 'production:report:' . (string)($_GET['report'] ?? ''),
+        default => null,
+    };
+    if ($permission !== null) require_permission($permission);
+    elseif (!can_access('production:all') && !can_access('production:new') && !can_access('production:balances')) require_permission('production:all');
+
     if ($action === 'list' || $action === 'balances') {
         $page = max(1,(int)($_GET['page']??1));
         $perPage = (int)($_GET['per_page']??250);
@@ -30,26 +46,32 @@ try {
     }
 
     if ($action === 'detail') {
+        require_project_access((int)($_GET['id'] ?? 0));
         json_response(production_detail(max(1,(int)($_GET['id']??0))));
     }
 
     if ($action === 'save' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
-        $id = production_save(request_json()['record'] ?? []);
+        $record = request_json()['record'] ?? [];
+        if (empty($record['ID'])) require_permission('production:new');
+        else require_project_access((int)$record['ID']);
+        $id = production_save($record);
+        if (empty($record['ID'])) $_SESSION['created_webcin_projects'][] = $id;
         json_response(['saved'=>true,'id'=>$id]);
     }
 
     if ($action === 'save_transaction' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         verify_csrf($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null);
         $payload = request_json();
+        require_project_access((int)($payload['record']['yazarID'] ?? 0));
         $id = production_save_transaction((string)($payload['type']??''),$payload['record']??[]);
         json_response(['saved'=>true,'id'=>$id]);
     }
 
-    json_response(['error'=>'Bilinmeyen üretim işlemi.'],404);
+    json_response(['error'=>'Bilinmeyen WebCin işlemi.'],404);
 } catch (InvalidArgumentException $exception) {
     json_response(['error'=>$exception->getMessage()],422);
 } catch (Throwable $exception) {
     error_log($exception->__toString());
-    json_response(['error'=>'Üretim verisi işlenirken hata oluştu: '.$exception->getMessage()],500);
+    json_response(['error'=>'WebCin verisi işlenirken hata oluştu: '.$exception->getMessage()],500);
 }

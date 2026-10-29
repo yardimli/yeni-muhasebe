@@ -5,6 +5,7 @@
   if (!desktop) return;
   const taskbar = document.getElementById('taskbar');
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const permissions = new Set(JSON.parse(document.getElementById('access-permissions').textContent));
   const windows = new Map();
   let topZ = 100;
   let sequence = 0;
@@ -161,9 +162,9 @@
       cache: 'no-store',
       headers: { 'Accept': 'application/json', ...(options.body ? {'Content-Type': 'application/json', 'X-CSRF-Token': csrf} : {}), ...(options.headers || {}) }
     });
-    const data = await response.json().catch(() => ({error: 'Geçersiz üretim sunucu yanıtı.'}));
+    const data = await response.json().catch(() => ({error: 'Geçersiz WebCin sunucu yanıtı.'}));
     if (response.status === 401) location.reload();
-    if (!response.ok) throw new Error(data.error || 'Üretim isteği tamamlanamadı.');
+    if (!response.ok) throw new Error(data.error || 'WebCin isteği tamamlanamadı.');
     return data;
   };
 
@@ -1089,7 +1090,7 @@
     } catch(error){grid.innerHTML=`<div class="p-8 text-center text-sm text-red-700">${escapeHtml(error.message)}</div>`;updateBusinessChartVisibility(win,false);}
   }
 
-  async function openProductionList(view = 'all', label = 'Üretim Projeleri', restoredState = null) {
+  async function openProductionList(view = 'all', label = 'WebCin Projeleri', restoredState = null) {
     const win = createWindow(`production-list:${view}`, label, 1240, 720);
     if (win.loaded) return win;
     win.loaded = true;
@@ -1101,6 +1102,7 @@
     search.value = win.state.q;
     let timer;
     search.oninput = () => { clearTimeout(timer); timer = setTimeout(() => { win.state.q = search.value; win.state.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); }, 300); };
+    win.body.querySelector('[data-new]').hidden = !permissions.has('production:new');
     win.body.querySelector('[data-new]').onclick = () => openProductionProject(null);
     win.body.querySelector('[data-refresh]').onclick = () => loadProductionList(win);
     initializeOutputButtons(win);
@@ -1113,7 +1115,7 @@
 
   async function loadProductionList(win) {
     const grid = win.body.querySelector('[data-grid]');
-    grid.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">Üretim kayıtları yükleniyor…</div>';
+    grid.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">WebCin kayıtları yükleniyor…</div>';
     try {
       const s = win.state;
       const data = await productionApi(dataUrlForWindow(win, s.page, s.perPage));
@@ -1122,7 +1124,7 @@
       const sortable = new Set(data.sortable_columns || []);
       const header = data.columns.map(column => `<th ${sortable.has(column) ? `data-sort="${escapeHtml(column)}"` : ''} class="sticky top-0 whitespace-nowrap border-b border-r border-slate-300 bg-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 ${sortable.has(column) ? 'cursor-pointer hover:bg-slate-300' : ''} ${money.has(column) ? 'text-right' : 'text-left'}">${escapeHtml(column)}${data.sort === column ? (data.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('');
       const rows = data.rows.map((row, rowIndex) => `<tr data-production-id="${escapeHtml(row.ID)}" class="cursor-pointer border-b border-slate-200 hover:bg-blue-50"><td class="sticky left-0 z-10 w-4 border-r border-slate-200 bg-slate-50 px-2 py-1 text-xs"><button type="button" data-production-row-action="${rowIndex}" class="w-full select-none rounded border border-slate-300 bg-white px-2 py-1 text-center font-medium text-blue-700 hover:bg-blue-50">+</button></td>${data.columns.map(column => { const value = money.has(column) ? formatMoney(row[column], data.currency) : String(row[column] ?? ''); const state = (column === 'CariBaglantisi' || column === 'UrunBaglantisi') && Number(row[column]) === 0 ? ' text-red-700' : ''; return `<td class="max-w-72 truncate whitespace-nowrap border-r border-slate-100 px-3 py-2 text-xs${money.has(column) ? ' text-right tabular-nums' : ''}${state}" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`; }).join('')}</tr>`).join('');
-      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr><th class="sticky left-0 top-0 z-30 border-b border-r border-slate-300 bg-slate-200 px-2 py-2 text-left text-xs font-semibold"></th>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length + 1}" class="p-10 text-center text-sm text-slate-500">Üretim kaydı bulunamadı.</td></tr>`}</tbody></table>`;
+      grid.innerHTML = `<table class="min-w-full border-collapse"><thead><tr><th class="sticky left-0 top-0 z-30 border-b border-r border-slate-300 bg-slate-200 px-2 py-2 text-left text-xs font-semibold"></th>${header}</tr></thead><tbody>${rows || `<tr><td colspan="${data.columns.length + 1}" class="p-10 text-center text-sm text-slate-500">WebCin kaydı bulunamadı.</td></tr>`}</tbody></table>`;
       grid.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const name = th.dataset.sort; s.dir = s.sort === name && s.dir === 'asc' ? 'desc' : 'asc'; s.sort = name; s.page = 1; scheduleSaveOpenWindows(); loadProductionList(win); });
       grid.querySelectorAll('[data-production-id]').forEach(row => row.ondblclick = () => openProductionProject(Number(row.dataset.productionId)));
       grid.querySelectorAll('[data-production-row-action]').forEach(trigger => trigger.onclick = event => {
@@ -1130,7 +1132,7 @@
         const row = data.rows[Number(trigger.dataset.productionRowAction)];
         const accounts = Array.isArray(row.__accounts) ? row.__accounts : [];
         const items = [
-          {action:{label:'Üretim Kaydını Aç'}, primary:true},
+          {action:{label:'WebCin Kaydını Aç'}, primary:true},
           ...accounts.map(account => ({action:{label:accounts.length === 1 ? 'Cari Kartlar' : `Cari Kartlar — ${account.name || `#${account.ID}`}`}, accountId:Number(account.ID)})),
         ];
         openRelationMenu(trigger, items, item => {
@@ -1150,7 +1152,7 @@
   }
 
   function productionTransactionTable(type, rows, projectId, currency) {
-    const label = type === 'expense' ? 'Üretim Maliyeti' : 'Alınan Ödemeler';
+    const label = type === 'expense' ? 'WebCin Maliyeti' : 'Alınan Ödemeler';
     const body = rows.map(row => `<tr data-production-transaction data-type="${type}" data-id="${escapeHtml(row.ID)}"><td class="p-1"><input type="date" data-date class="form-input" value="${escapeHtml(String(row.tarih || '').slice(0,10))}"></td><td class="p-1"><input data-description class="form-input" value="${escapeHtml(row.aciklama || '')}"></td><td class="p-1"><input type="number" step="0.01" data-amount class="form-input text-right" value="${escapeHtml(row.tutar || 0)}"></td><td class="p-1"><button type="button" class="toolbar-button h-8" data-save-transaction>Kaydet</button></td></tr>`).join('');
     return `<section class="rounded border border-slate-300 bg-white"><header class="flex items-center border-b border-slate-300 bg-slate-100 px-3 py-2"><strong>${label}</strong><span class="ml-auto text-xs text-slate-500">${rows.length.toLocaleString('tr-TR')} hareket · ${escapeHtml(currency)}</span></header><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-50"><th class="p-2 text-left">Tarih</th><th class="p-2 text-left">Açıklama</th><th class="p-2 text-right">Tutar</th><th></th></tr></thead><tbody>${body}<tr data-production-transaction data-type="${type}" data-id="0" class="border-t border-blue-200 bg-blue-50"><td class="p-1"><input type="date" data-date class="form-input" value="${new Date().toISOString().slice(0,10)}"></td><td class="p-1"><input data-description class="form-input" placeholder="Yeni hareket açıklaması"></td><td class="p-1"><input type="number" step="0.01" data-amount class="form-input text-right" value="0"></td><td class="p-1"><button type="button" class="toolbar-button h-8 bg-blue-600 text-white" data-save-transaction>Ekle</button></td></tr></tbody></table></div></section>`;
   }
@@ -1158,7 +1160,7 @@
   async function openProductionProject(id = null, restoredState = null) {
     id = id ? Number(id) : null;
     const key = id ? `production-project:${id}` : `production-project:new:${Date.now()}`;
-    const win = createWindow(key, id ? `Üretim Kaydı #${id}` : 'Yeni Üretim Kaydı', 1180, 780, {relationship: Boolean(id)});
+    const win = createWindow(key, id ? `WebCin Kaydı #${id}` : 'Yeni WebCin Kaydı', 1180, 780, {relationship: Boolean(id)});
     if (win.loaded) return win;
     win.loaded = true; win.kind = 'production_project'; win.state = {...(restoredState || {}), id};
     scheduleSaveOpenWindows();
@@ -1167,18 +1169,18 @@
   }
 
   async function loadProductionProject(win) {
-    win.body.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">Üretim kaydı yükleniyor…</div>';
+    win.body.innerHTML = '<div class="p-8 text-center text-sm text-slate-500">WebCin kaydı yükleniyor…</div>';
     try {
       const data = win.state.id ? await productionApi(`?action=detail&id=${win.state.id}`) : {...await productionApi('?action=metadata'), record: {}, expenses: [], payments: [], summary: {cost:0,payment:0,balance:0}, main_links: {accounts:[],products:[]}};
       const record = data.record || {};
-      if (win.state.id) updateWindowTitle(win, `Üretim — ${record.KitabinAdi || 'Adsız kitap'} (#${win.state.id})`);
+      if (win.state.id) updateWindowTitle(win, `WebCin — ${record.KitabinAdi || 'Adsız kitap'} (#${win.state.id})`);
       const groups = Object.entries(data.groups || {}).map(([group, fields], index) => `<details class="rounded border border-slate-300 bg-white" ${index < 3 ? 'open' : ''}><summary class="cursor-pointer bg-slate-100 px-3 py-2 text-sm font-semibold">${escapeHtml(group)}</summary><div class="grid grid-cols-1 gap-3 p-3 md:grid-cols-2">${Object.entries(fields).map(([name, definition]) => productionInput(name, definition, record[name])).join('')}</div></details>`).join('');
       const accounts = (data.main_links?.accounts || []).map(account => `<div class="flex flex-wrap items-center gap-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs"><strong>#${escapeHtml(account.ID)} — ${escapeHtml(account.name || 'Adsız cari')}</strong><span class="text-slate-500">${escapeHtml(account.eposta || '')}</span><button type="button" class="toolbar-button h-8 ml-auto" data-open-main-account="${escapeHtml(account.ID)}">Cariyi Aç</button><button type="button" class="toolbar-button h-8" data-open-main-products="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Ürünleri Aç</button><button type="button" class="toolbar-button h-8" data-open-author-sales="${escapeHtml(account.ID)}" data-account-name="${escapeHtml(account.name || '')}">Tüm Satışlar</button></div>`).join('');
       const products = (data.main_links?.products || []).map(product => `<tr class="border-t border-slate-200"><td class="p-2">#${escapeHtml(product.ID)}</td><td class="p-2">${escapeHtml(product.isbn || '')}</td><td class="p-2 font-medium">${escapeHtml(product.kitapadi || '')}</td><td class="p-2 text-right">${Number(product.metrics?.['Satış'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['İade'] || 0).toLocaleString('tr-TR')}</td><td class="p-2 text-right">${Number(product.metrics?.['Yazara Verilen'] || 0).toLocaleString('tr-TR')}</td><td class="p-2"><button type="button" class="toolbar-button h-8" data-open-product-sales="${escapeHtml(product.ID)}" data-product-name="${escapeHtml(product.kitapadi || '')}">Satış Geçmişi</button></td></tr>`).join('');
       const placeholderEmail = String(record.YazarinEpostasi || '').trim().toLocaleLowerCase('tr-TR') === 'admin@ciniusyayinlari.com';
       const linksPanel = placeholderEmail ? '' : `<section class="rounded border border-blue-300 bg-white"><div class="space-y-2 p-2">${accounts || '<div class="rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">Bu e-posta ile eşleşen cari kart bulunamadı.</div>'}</div><div class="overflow-auto"><table class="min-w-full text-xs"><thead><tr class="bg-slate-100"><th class="p-2 text-left">ID</th><th class="p-2 text-left">ISBN</th><th class="p-2 text-left">Ürün</th><th class="p-2 text-right">Satış</th><th class="p-2 text-right">İade</th><th class="p-2 text-right">Yazara verilen</th><th></th></tr></thead><tbody>${products || '<tr><td colspan="7" class="p-5 text-center text-slate-500">Bağlı ürün bulunamadı.</td></tr>'}</tbody></table></div></section>`;
       const showFinancialSummary = [data.summary?.cost, data.summary?.payment, data.summary?.balance].some(value => Number(value || 0) !== 0);
-      const financialSummary = showFinancialSummary ? `<div class="flex items-center gap-5 overflow-x-auto whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"><span class="text-slate-600">Üretim maliyeti <strong class="ml-1 text-slate-900">${formatMoney(data.summary.cost,data.currency)}</strong></span><span class="text-emerald-700">Alınan ödeme <strong class="ml-1">${formatMoney(data.summary.payment,data.currency)}</strong></span><span class="text-amber-800">Kalan <strong class="ml-1">${formatMoney(data.summary.balance,data.currency)}</strong></span></div>` : '';
+      const financialSummary = showFinancialSummary ? `<div class="flex items-center gap-5 overflow-x-auto whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs"><span class="text-slate-600">WebCin maliyeti <strong class="ml-1 text-slate-900">${formatMoney(data.summary.cost,data.currency)}</strong></span><span class="text-emerald-700">Alınan ödeme <strong class="ml-1">${formatMoney(data.summary.payment,data.currency)}</strong></span><span class="text-amber-800">Kalan <strong class="ml-1">${formatMoney(data.summary.balance,data.currency)}</strong></span></div>` : '';
       const transactions = win.state.id ? `<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">${productionTransactionTable('expense', data.expenses || [], win.state.id, data.currency)}${productionTransactionTable('payment', data.payments || [], win.state.id, data.currency)}</div>` : '';
       win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-2 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button bg-blue-600 text-white" data-save-project>✓ Kaydet</button>${win.state.id ? '<button class="toolbar-button" data-refresh>↻ Yenile</button>' : ''}<span class="ml-auto text-xs text-slate-500">CUP veritabanı: ayrı bağlantı</span></div><div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">${win.state.id ? `${financialSummary}${linksPanel}` : ''}<form data-production-form class="space-y-3">${groups}</form>${transactions}</div></div>`;
       const form = win.body.querySelector('[data-production-form]');
@@ -1189,7 +1191,7 @@
         if (win.state.id) recordPayload.ID = win.state.id;
         try {
           const saved = await productionApi('?action=save', {method:'POST',body:JSON.stringify({record:recordPayload})});
-          win.dirty = false; toast(`Üretim kaydı #${saved.id} kaydedildi.`);
+          win.dirty = false; toast(`WebCin kaydı #${saved.id} kaydedildi.`);
           [...windows.values()].filter(item => item.kind === 'production_list').forEach(loadProductionList);
           if (!win.state.id) { closeWindow(win); openProductionProject(saved.id); } else loadProductionProject(win);
         } catch (error) { toast(error.message,'error'); }
@@ -1199,7 +1201,7 @@
         const row = button.closest('[data-production-transaction]');
         try {
           await productionApi('?action=save_transaction',{method:'POST',body:JSON.stringify({type:row.dataset.type,record:{ID:Number(row.dataset.id),yazarID:win.state.id,tarih:row.querySelector('[data-date]').value,aciklama:row.querySelector('[data-description]').value,tutar:row.querySelector('[data-amount]').value}})});
-          toast('Üretim hareketi kaydedildi.'); loadProductionProject(win);
+          toast('WebCin hareketi kaydedildi.'); loadProductionProject(win);
         } catch (error) { toast(error.message,'error'); }
       });
       win.body.querySelectorAll('[data-open-main-account]').forEach(button => button.onclick = () => openEditor('adresdefteri','Cari Kartlar',Number(button.dataset.openMainAccount),null));
@@ -1228,6 +1230,9 @@
     try {
       for (const descriptor of descriptors) {
         const s = descriptor.state;
+        let permission = ({table:`table:${s.table}`, editor:`table:${s.table}`, invoice:'table:faturabaslik', report:`table:${s.report === 'product_sales' ? 'asp_urun' : 'adresdefteri'}`, business_report:`report:${s.report}`, settings:'settings:currency', production_list:`production:${s.view === 'balances' ? 'balances' : 'all'}`, production_report:`production:report:${s.report}`, production_project:s.id ? (permissions.has('production:all') ? 'production:all' : permissions.has('production:balances') ? 'production:balances' : 'production:new') : 'production:new'})[descriptor.kind];
+        if (permission && !permissions.has(permission)) continue;
+        if (typeof s.label === 'string') s.label = s.label.replaceAll('Üretim', 'WebCin');
         let win = null;
         if (descriptor.kind === 'table' && s.table && s.label) {
           if (unavailableTables.has(s.table)) continue;
@@ -1246,7 +1251,7 @@
         } else if (descriptor.kind === 'settings' && s.section === 'currency') {
           win = await openCurrencySettings(s);
         } else if (descriptor.kind === 'production_list') {
-          win = await openProductionList(s.view || 'all', s.label || 'Üretim Projeleri', s);
+          win = await openProductionList(s.view || 'all', s.label || 'WebCin Projeleri', s);
         } else if (descriptor.kind === 'production_report' && s.report && s.label) {
           win = await openProductionReport(s.report, s.label, s);
         } else if (descriptor.kind === 'production_project') {
@@ -1260,12 +1265,77 @@
     }
   }
 
+  async function usersApi(payload) {
+    const response = await fetch('users_api.php', {
+      method: payload ? 'POST' : 'GET', cache: 'no-store',
+      headers: {'Accept':'application/json', ...(payload ? {'Content-Type':'application/json', 'X-CSRF-Token':csrf} : {})},
+      ...(payload ? {body:JSON.stringify(payload)} : {})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Kullanıcı işlemi başarısız.');
+    return data;
+  }
+
+  async function openUsers() {
+    const win = createWindow('users', 'Kullanıcı Yönetimi', 850, 550);
+    try {
+      const data = await usersApi();
+      win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex gap-2 border-b border-slate-300 p-2"><button class="toolbar-button" data-add-user>+ Yeni Kullanıcı</button><button class="toolbar-button" data-refresh-users>Yenile</button></div><div class="flex-1 overflow-auto"><table class="min-w-full text-left text-sm"><thead class="bg-slate-200"><tr><th class="p-3">Kullanıcı Adı</th><th class="p-3">Rol</th><th class="p-3">Hesap</th></tr></thead><tbody>${data.users.map((user, i) => `<tr class="cursor-pointer border-b border-slate-200 hover:bg-blue-50" data-user-row="${i}"><td class="p-3"><button class="text-blue-700 underline">${escapeHtml(user.username)}</button></td><td class="p-3">${user.role === 'administrator' ? 'Yönetici' : 'Kullanıcı'}</td><td class="p-3">${user.protected ? 'Ana yönetici' : ''}</td></tr>`).join('')}</tbody></table></div></div>`;
+      win.body.querySelector('[data-add-user]').onclick = () => openUserEditor(null, data.menus);
+      win.body.querySelector('[data-refresh-users]').onclick = openUsers;
+      win.body.querySelectorAll('[data-user-row]').forEach(row => row.onclick = () => openUserEditor(data.users[Number(row.dataset.userRow)], data.menus));
+    } catch (error) { win.body.textContent = error.message; }
+  }
+
+  function openUserEditor(user, menus) {
+    const key = `user:${user?.id || 'new'}`;
+    if (windows.has(key)) { restoreWindow(windows.get(key)); return; }
+    const win = createWindow(key, user ? `Kullanıcı — ${user.username}` : 'Yeni Kullanıcı', 700, 700);
+    if (user?.id === 'environment') {
+      win.body.innerHTML = '<p class="p-5 text-sm">Ana yönetici tüm menülere erişebilir ve normal kullanıcı yapılamaz. Kullanıcı adı ve parola sunucudaki .env dosyasından yönetilir.</p>';
+      return;
+    }
+    const selected = new Set(user?.permissions || []);
+    const checkbox = (key, label) => `<label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" name="permissions" value="${escapeHtml(key)}" ${selected.has(key) ? 'checked' : ''}>${escapeHtml(label)}</label>`;
+    win.body.innerHTML = `<form class="flex h-full flex-col" data-user-form><div class="flex-1 space-y-4 overflow-auto p-4"><label class="block text-sm">Kullanıcı Adı<input class="mt-1 w-full rounded border border-slate-300 p-2" name="username" required minlength="3" maxlength="80" autocomplete="off" value="${escapeHtml(user?.username || '')}"></label><label class="block text-sm">${user ? 'Yeni Parola (değiştirmemek için boş bırakın)' : 'Parola'}<input class="mt-1 w-full rounded border border-slate-300 p-2" name="password" type="password" minlength="12" ${user ? '' : 'required'} autocomplete="new-password"></label><label class="flex items-center gap-2 text-sm"><input type="checkbox" name="admin" ${user?.role === 'administrator' ? 'checked' : ''} ${user?.protected ? 'disabled' : ''}>Yönetici${user?.protected ? ' (ana yönetici, değiştirilemez)' : ''}</label><p class="text-xs text-slate-500">Yöneticiler tüm menüleri görür. Normal kullanıcılar için ana menüyü ve erişilecek alt menüleri seçin.</p><div data-permission-fields>${Object.entries(menus).map(([group, items]) => {
+      const available = Object.entries(items).filter(([, item]) => !item.admin);
+      if (!available.length) return '';
+      return `<fieldset class="mb-3 rounded border border-slate-300 p-3"><legend class="px-1 font-semibold">${escapeHtml(group)}</legend>${checkbox(`menu:${group}`, `${group} menüsünü göster`)}<div class="ml-4" data-menu-children>${available.map(([key, item]) => checkbox(key, `${item.subgroup ? item.subgroup + ' / ' : ''}${item.label}`)).join('')}</div></fieldset>`;
+    }).join('')}</div><p class="text-sm text-red-700" data-user-error role="alert"></p></div><div class="border-t border-slate-300 p-3"><button class="toolbar-button" type="submit">Kaydet</button></div></form>`;
+    const form = win.body.querySelector('form');
+    const admin = form.elements.admin;
+    const updatePermissions = () => {
+      form.querySelector('[data-permission-fields]').hidden = admin.checked;
+      form.querySelectorAll('fieldset').forEach(fieldset => {
+        const parent = fieldset.querySelector('input');
+        fieldset.querySelectorAll('[data-menu-children] input').forEach(input => { input.disabled = !parent.checked; });
+      });
+    };
+    form.oninput = () => { win.dirty = true; updatePermissions(); };
+    updatePermissions();
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const button = form.querySelector('[type="submit"]');
+      button.disabled = true;
+      try {
+        await usersApi({id:user?.id || '', username:form.elements.username.value, password:form.elements.password.value, role:admin.checked ? 'administrator' : 'user', permissions:[...form.querySelectorAll('[name="permissions"]:checked')].filter(input => !input.disabled).map(input => input.value)});
+        win.dirty = false; closeWindow(win); toast('Kullanıcı kaydedildi.');
+        // Refresh navigation when editing the currently signed-in account.
+        if (String(user?.id) === desktop.dataset.userId) location.reload();
+        else await openUsers();
+      } catch (error) { form.querySelector('[data-user-error]').textContent = error.message; }
+      finally { button.disabled = false; }
+    };
+  }
+
+  document.querySelectorAll('[data-open-users]').forEach(button => button.onclick = openUsers);
+
   document.querySelectorAll('[data-open-table]').forEach(button => button.onclick = () => openTable(button.dataset.openTable, button.dataset.label));
   document.querySelectorAll('[data-open-settings]').forEach(button => button.onclick = event => { event.stopPropagation(); if (button.dataset.openSettings === 'currency') openCurrencySettings(); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-business-report]').forEach(button => button.onclick = event => { event.stopPropagation(); openBusinessReport(button.dataset.openBusinessReport, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-production-list]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList(button.dataset.openProductionList, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-production-new]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionProject(null); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
-  document.querySelectorAll('[data-open-production-balances]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList('balances', 'Üretim Bakiyeleri'); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
+  document.querySelectorAll('[data-open-production-balances]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionList('balances', 'WebCin Bakiyeleri'); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('[data-open-production-report]').forEach(button => button.onclick = event => { event.stopPropagation(); openProductionReport(button.dataset.openProductionReport, button.dataset.label); document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible','!opacity-100')); });
   document.querySelectorAll('nav > .group > button').forEach(trigger => {
     trigger.addEventListener('click', event => {
@@ -1278,6 +1348,11 @@
   document.addEventListener('click', () => document.querySelectorAll('.menu-panel').forEach(panel => panel.classList.remove('!visible', '!opacity-100')));
   window.addEventListener('resize', () => windows.forEach(win => { if (win.maximized) fitWindowInsideDesktop(win); }));
   document.querySelectorAll('[data-window-command]').forEach(button => button.onclick = () => {
+    if (button.dataset.windowCommand === 'close-all') {
+      if ([...windows.values()].some(win => win.dirty) && !confirm('Kaydedilmemiş değişiklikler kaybolacak. Tüm pencereler kapatılsın mı?')) return;
+      [...windows.values()].forEach(win => { win.dirty = false; closeWindow(win); });
+      return;
+    }
     const visible = [...windows.values()].filter(win => !win.minimized);
     if (button.dataset.windowCommand === 'minimize-all') return visible.forEach(minimizeWindow);
     if (button.dataset.windowCommand === 'cascade') visible.forEach((win, index) => { if (win.maximized) maximizeWindow(win); Object.assign(win.el.style, {left: `${20 + index * 28}px`, top: `${16 + index * 25}px`, width: `${Math.min(900, desktop.clientWidth - 100)}px`, height: `${Math.min(580, desktop.clientHeight - 90)}px`}); fitWindowInsideDesktop(win); activateWindow(win); });

@@ -47,7 +47,10 @@ function users(): array
     if (!is_file(users_file())) {
         return [];
     }
-    $decoded = json_decode((string) file_get_contents(users_file()), true);
+    $file = fopen(users_file(), 'r');
+    if (!$file || !flock($file, LOCK_SH)) throw new RuntimeException('Cannot read users.');
+    try { $decoded = json_decode(stream_get_contents($file), true); }
+    finally { flock($file, LOCK_UN); fclose($file); }
     return is_array($decoded) ? ($decoded['users'] ?? []) : [];
 }
 
@@ -111,7 +114,19 @@ function attempt_login(string $username, string $password): bool
 
 function current_user(): ?array
 {
-    return isset($_SESSION['user']) && is_array($_SESSION['user']) ? $_SESSION['user'] : null;
+    $session = $_SESSION['user'] ?? null;
+    if (!is_array($session)) return null;
+    if (($session['id'] ?? '') === 'environment') {
+        $user = environment_login_user();
+        return $user ? public_user($user) : null;
+    }
+    foreach (users() as $user) {
+        if ((string)$user['id'] === (string)($session['id'] ?? '')) {
+            if (protected_user($user)) $user['role'] = 'administrator';
+            return public_user($user);
+        }
+    }
+    return null;
 }
 
 function require_auth(): void
@@ -220,5 +235,6 @@ function h(mixed $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+require_once APP_ROOT . '/app/access.php';
 require_once APP_ROOT . '/app/settings.php';
 ensure_settings_table();

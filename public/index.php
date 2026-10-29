@@ -79,54 +79,29 @@ $user = current_user();
         <header class="relative z-[9000] flex h-10 shrink-0 items-stretch border-b border-slate-700 bg-slate-900 text-slate-100 shadow-lg">
             <div class="flex items-center bg-blue-700 px-4 text-sm font-bold">Cinius Muhasebe</div>
             <nav class="flex items-stretch">
-                <?php foreach ($groups as $group => $tables): ?>
+                <?php foreach (menu_catalog() as $group => $items):
+                    $visible = array_filter($items, fn($item, $key) => can_access($key), ARRAY_FILTER_USE_BOTH);
+                    if (!$visible) continue;
+                    $sections = [];
+                    foreach ($visible as $key => $item) $sections[$item['subgroup'] ?? ''][$key] = $item;
+                ?>
                     <div class="group relative flex items-center px-3 text-sm hover:bg-slate-700">
                         <button type="button"><?= h($group) ?></button>
                         <div class="menu-panel">
-                            <?php foreach ($tables as $table => $config): ?>
-                                <button type="button" data-open-table="<?= h($table) ?>" data-label="<?= h($config['label']) ?>" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><?= h($config['label']) ?></button>
+                            <?php foreach ($sections as $section => $entries): ?>
+                                <?php if ($section !== ''): ?>
+                                    <div class="report-group relative">
+                                        <button type="button" class="flex w-full items-center justify-between whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><span><?= h($section) ?></span><span class="ml-4">›</span></button>
+                                        <div class="report-submenu">
+                                <?php endif; ?>
+                                <?php foreach ($entries as $key => $item): $tag = $item['attribute'] === 'href' ? 'a' : 'button'; ?>
+                                    <<?= $tag ?> <?= $tag === 'button' ? 'type="button"' : '' ?> <?= h($item['attribute']) ?>="<?= h($item['value']) ?>" data-label="<?= h($item['label']) ?>" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><?= h($item['label']) ?></<?= $tag ?>>
+                                <?php endforeach; ?>
+                                <?php if ($section !== ''): ?></div></div><?php endif; ?>
                             <?php endforeach; ?>
-                            <?php if ($group === 'Tanımlar'): ?>
-                                <button type="button" data-open-settings="currency" class="block w-full whitespace-nowrap border-t border-slate-700 px-4 py-2 text-left text-sm hover:bg-blue-600">Para Birimi</button>
-                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
-                <div class="group relative flex items-center px-3 text-sm hover:bg-slate-700">
-                    <button type="button">Üretim</button>
-                    <div class="menu-panel">
-                        <button type="button" data-open-production-list="all" data-label="Üretim Projeleri" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Üretim Projeleri</button>
-                        <button type="button" data-open-production-new class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Yeni Üretim Kaydı</button>
-                        <button type="button" data-open-production-balances class="block w-full whitespace-nowrap border-t border-slate-700 px-4 py-2 text-left text-sm hover:bg-blue-600">Üretim Bakiyeleri</button>
-                        <div class="border-t border-slate-700 px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Raporlar</div>
-                        <button type="button" data-open-production-report="returning_authors" data-label="Geri Dönen Yazarlar" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Geri Dönen Yazarlar</button>
-                        <button type="button" data-open-production-report="package_distribution" data-label="Paket Dağılımı" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600">Paket Dağılımı</button>
-                    </div>
-                </div>
-                <div class="group relative flex items-center px-3 text-sm hover:bg-slate-700">
-                    <button type="button">Raporlar</button>
-                    <div class="menu-panel">
-                        <?php foreach ($businessReports as $reportGroup => $reports): ?>
-                            <div class="report-group relative">
-                                <button type="button" class="flex w-full items-center justify-between whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><span><?= h($reportGroup) ?></span><span class="ml-4">›</span></button>
-                                <div class="report-submenu">
-                                    <?php foreach ($reports as $reportId => $reportLabel): ?>
-                                        <button type="button" data-open-business-report="<?= h($reportId) ?>" data-label="<?= h($reportLabel) ?>" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><?= h($reportLabel) ?></button>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-                <div class="group relative flex items-center px-3 text-sm hover:bg-slate-700">
-                    <button type="button">Pencere</button>
-                    <div class="menu-panel">
-                        <button class="block w-full px-4 py-2 text-left text-sm hover:bg-blue-600" data-window-command="cascade">Basamakla</button>
-                        <button class="block w-full px-4 py-2 text-left text-sm hover:bg-blue-600" data-window-command="tile">Yan Yana Diz</button>
-                        <button class="block w-full px-4 py-2 text-left text-sm hover:bg-blue-600" data-window-command="minimize-all">Tümünü Küçült</button>
-                        <a href="cleanup.php" class="block w-full border-t border-slate-700 px-4 py-2 text-left text-sm text-amber-300 hover:bg-blue-600 hover:text-white">Veri Temizleme…</a>
-                    </div>
-                </div>
             </nav>
             <div class="ml-auto flex items-center gap-4 px-3 text-xs">
                 <span><?= h($user['username']) ?></span>
@@ -143,6 +118,7 @@ $user = current_user();
         <footer id="taskbar" class="z-[9000] flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-t border-slate-600 bg-slate-900 px-2 text-white"></footer>
     </div>
     <div id="toast-region" class="fixed bottom-14 right-4 z-[20000] flex w-80 flex-col gap-2"></div>
+    <script id="access-permissions" type="application/json"><?= json_encode(array_values(array_filter(array_merge(...array_values(array_map('array_keys', menu_catalog()))), 'can_access')), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
     <script src="assets/app.js?v=<?= (int) (@filemtime(__DIR__ . '/assets/app.js') ?: time()) ?>" defer></script>
 <?php endif; ?>
 </body>
