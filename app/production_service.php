@@ -401,6 +401,13 @@ function production_normalized_value(mixed $value, array $column, string $field)
     return $value;
 }
 
+function production_title_with_id(string $title, int $id): string
+{
+    // Match the complete ID, not a longer number or an ID inside the title.
+    if (preg_match('/^\s*' . preg_quote((string) $id, '/') . '(?=\s|[-–—]|$)/u', $title)) return $title;
+    return $id . ' - ' . trim($title);
+}
+
 function production_save(array $input): int
 {
     $columns = production_columns();
@@ -414,6 +421,7 @@ function production_save(array $input): int
     if (trim((string) ($record['KitabinAdi'] ?? '')) === '') throw new InvalidArgumentException('Kitap adı zorunludur.');
     if ($record === []) throw new InvalidArgumentException('Kaydedilecek üretim alanı bulunamadı.');
     if ($id > 0) {
+        $record['KitabinAdi'] = production_title_with_id((string) $record['KitabinAdi'], $id);
         $set = implode(',', array_map(fn(string $field):string=>"`$field`=?", array_keys($record)));
         $statement = cup_db()->prepare("UPDATE `cinius_uretim` SET $set WHERE `ID`=?");
         $statement->execute([...array_values($record),$id]);
@@ -423,6 +431,10 @@ function production_save(array $input): int
         $statement = cup_db()->prepare("INSERT INTO `cinius_uretim` ($fields) VALUES ($placeholders)");
         $statement->execute(array_values($record));
         $id = (int) cup_db()->lastInsertId();
+        // The actual auto-increment ID is only available after the insert.
+        $record['KitabinAdi'] = production_title_with_id((string) $record['KitabinAdi'], $id);
+        $statement = cup_db()->prepare('UPDATE `cinius_uretim` SET `KitabinAdi`=? WHERE `ID`=?');
+        $statement->execute([$record['KitabinAdi'], $id]);
     }
     audit_log('save_production_project','cup_veri.cinius_uretim',$id,['fields'=>array_keys($record)]);
     return $id;
