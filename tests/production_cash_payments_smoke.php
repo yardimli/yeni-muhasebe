@@ -9,34 +9,32 @@ function check_payments(bool $condition, string $message): void
     if (!$condition) throw new RuntimeException($message);
 }
 
-// Compare the batched list summary against individual Kasa movements; no data is written.
-$emails = db()->query("SELECT DISTINCT a.eposta FROM adresdefteri a JOIN kasa k ON k.MusteriID=a.ID
-    WHERE k.Islem=2 AND NULLIF(TRIM(a.eposta),'') IS NOT NULL LIMIT 20")->fetchAll(PDO::FETCH_COLUMN);
-$rows = array_map(fn($email)=>['YazarinEpostasi'=>$email], $emails);
-$rows[] = ['YazarinEpostasi'=>''];
-$rows[] = ['YazarinEpostasi'=>'admin@ciniusyayinlari.com'];
-production_enrich_link_counts($rows, true);
-$checked = 0;
-foreach ($rows as $row) {
-    $ids = array_column($row['__accounts'], 'ID');
-    if (!$ids) {
-        check_payments($row['Yapılan Ödeme'] === null && $row['Son Ödeme Tarihi'] === null, 'Unlinked project has payment data.');
-        continue;
-    }
-    $statement = db()->prepare('SELECT Islem,Miktar,islemTarihi FROM kasa WHERE MusteriID IN (' . implode(',', array_fill(0,count($ids),'?')) . ')');
-    $statement->execute($ids);
-    $expectedTotal = 0.0;
-    $expectedDate = null;
+// Read-only comparison with individual movements, including books without payments.
+$ids = db()->query("SELECT DISTINCT u.ID FROM asp_urun u JOIN kasa k ON k.UrunID=u.ID
+    WHERE u.CinYazarID > 0 LIMIT 20")->fetchAll(PDO::FETCH_COLUMN);
+$ids = array_unique([...$ids, ...db()->query('SELECT ID FROM asp_urun WHERE CinYazarID > 0 LIMIT 20')->fetchAll(PDO::FETCH_COLUMN)]);
+$payments = production_book_payments($ids);
+check_payments(production_book_payments([]) === [], 'Empty product list must return no payments.');
+foreach ($ids as $id) {
+    $statement = db()->prepare('SELECT k.Islem,k.Miktar,k.islemTarihi,k.MusteriID,u.CinYazarID FROM kasa k JOIN asp_urun u ON u.ID=k.UrunID WHERE k.UrunID=?');
+    $statement->execute([$id]);
+    $total = 0.0;
+    $date = null;
     foreach ($statement as $movement) {
-        if ((int)$movement['Islem'] !== 2) continue;
-        $expectedTotal += (float)$movement['Miktar'];
-        $date = $movement['islemTarihi'] === null ? null : substr($movement['islemTarihi'],0,10);
-        if (($date ?? '') > ($expectedDate ?? '')) $expectedDate = $date;
+        if ((int)$movement['Islem'] !== 2 || (int)$movement['MusteriID'] !== (int)$movement['CinYazarID']) continue;
+        $total += (float)$movement['Miktar'];
+        $movementDate = $movement['islemTarihi'] === null ? null : substr($movement['islemTarihi'], 0, 10);
+        if (($movementDate ?? '') > ($date ?? '')) $date = $movementDate;
     }
-    check_payments(abs($row['Yapılan Ödeme'] - $expectedTotal) < 0.01, 'Outgoing payment total differs from Kasa movements.');
-    check_payments($row['Son Ödeme Tarihi'] === $expectedDate, 'Last outgoing payment date differs from Kasa movements.');
-    $checked++;
+    $actual = $payments[(int)$id] ?? ['total'=>0, 'last_date'=>null];
+    check_payments(abs($actual['total']-$total) < 0.01, 'Book payment total differs from its author cash movements.');
+    check_payments($actual['last_date'] === $date, 'Book last payment date differs.');
+}
+$list = production_list(1,50,'','all','ID','desc');
+foreach (['Yapılan Ödeme','Son Ödeme Tarihi'] as $column) {
+    check_payments(!in_array($column,$list['columns'],true), 'Payment column remains in project list.');
+    foreach ($list['rows'] as $row) check_payments(!array_key_exists($column,$row), 'Author payment aggregation remains in project list.');
 }
 $balances = production_list(1,50,'','balances','ID','desc');
-check_payments(in_array('Kalan',$balances['columns'],true) && !in_array('Yapılan Ödeme',$balances['columns'],true), 'Balances view changed.');
-echo "Kasa outgoing payments (Gider) and latest dates verified for $checked linked email groups; unlinked rows and balances verified.\n";
+check_payments(in_array('Kalan',$balances['columns'],true), 'Balances view changed.');
+echo count($ids) . " book payment totals and dates verified; project list and balances verified.\n";

@@ -23,7 +23,7 @@ assert_production(count($list['rows']) <= 50, 'Production list did not respect i
 foreach (['UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi'] as $hidden) {
     assert_production(!in_array($hidden,$list['columns'],true), 'Old project column is still visible: ' . $hidden);
 }
-foreach (['Yapılan Ödeme','Son Ödeme Tarihi'] as $column) assert_production(in_array($column,$list['columns'],true), 'Outgoing payment column missing.');
+foreach (['Yapılan Ödeme','Son Ödeme Tarihi'] as $column) assert_production(!in_array($column,$list['columns'],true), 'Project list must not show author-wide payments.');
 assert_production(in_array('UrunBaglantisi',$list['columns'],true), 'Main-product linkage column is missing.');
 
 $detailChecked = false;

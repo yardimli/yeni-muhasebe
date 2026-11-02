@@ -105,7 +105,9 @@ function production_main_links(string $email): array
         $productStatement->execute($accountIds);
         $products = $productStatement->fetchAll();
         $metrics = product_metrics_for_ids(array_column($products, 'ID'));
+        $payments = production_book_payments(array_column($products, 'ID'));
         foreach ($products as &$product) {
+            $product['payments'] = $payments[(int) $product['ID']] ?? ['total'=>0, 'last_date'=>null];
             $product['metrics'] = $metrics[(int) $product['ID']] ?? ['Satış'=>0,'İade'=>0,'Yazara Verilen'=>0];
         }
         unset($product);
@@ -117,7 +119,23 @@ function production_main_links(string $email): array
     return ['accounts'=>$accounts, 'products'=>$products];
 }
 
-function production_enrich_link_counts(array &$rows, bool $includeCashPayments = false): void
+// Payments must reference both the book and its author; unallocated cash stays unallocated.
+function production_book_payments(array $productIds): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $productIds), fn(int $id):bool=>$id > 0)));
+    if ($ids === []) return [];
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $statement = db()->prepare("SELECT k.`UrunID`, SUM(COALESCE(k.`Miktar`,0)) total,
+        DATE(MAX(k.`islemTarihi`)) last_date FROM `kasa` k
+        JOIN `asp_urun` u ON u.`ID`=k.`UrunID` AND u.`CinYazarID`=k.`MusteriID`
+        WHERE k.`Islem`=2 AND k.`UrunID` IN ($in) GROUP BY k.`UrunID`");
+    $statement->execute($ids);
+    $payments = [];
+    foreach ($statement->fetchAll() as $row) $payments[(int)$row['UrunID']] = ['total'=>(float)$row['total'], 'last_date'=>$row['last_date']];
+    return $payments;
+}
+
+function production_enrich_link_counts(array &$rows): void
 {
     $emails = array_values(array_unique(array_filter(
         array_map(fn(array $row):string=>production_email((string)($row['YazarinEpostasi']??'')), $rows),
@@ -125,7 +143,6 @@ function production_enrich_link_counts(array &$rows, bool $includeCashPayments =
     )));
     $accountsByEmail = [];
     $productCounts = [];
-    $paymentsByAccount = [];
     if ($emails !== []) {
         $in = implode(',', array_fill(0,count($emails),'?'));
         $statement = db()->prepare("SELECT `ID`,`FirmaAd`,`Ad`,`Soyad`,LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci normalized_email FROM `adresdefteri` WHERE LOWER(TRIM(CONVERT(`eposta` USING utf8mb4))) COLLATE utf8mb4_unicode_ci IN ($in)");
@@ -142,13 +159,7 @@ function production_enrich_link_counts(array &$rows, bool $includeCashPayments =
             $products = db()->prepare("SELECT `CinYazarID`,COUNT(*) qty FROM `asp_urun` WHERE `CinYazarID` IN ($accountIn) GROUP BY `CinYazarID`");
             $products->execute($allAccountIds);
             foreach ($products->fetchAll() as $product) $productCounts[(int)$product['CinYazarID']] = (int)$product['qty'];
-            if ($includeCashPayments) {
-                $cashPayments = db()->prepare("SELECT `MusteriID`, SUM(COALESCE(`Miktar`,0)) total,
-                    DATE(MAX(`islemTarihi`)) last_date FROM `kasa`
-                    WHERE `Islem`=2 AND `MusteriID` IN ($accountIn) GROUP BY `MusteriID`");
-                $cashPayments->execute($allAccountIds);
-                foreach ($cashPayments->fetchAll() as $cashPayment) $paymentsByAccount[(int)$cashPayment['MusteriID']] = $cashPayment;
-            }
+
         }
     }
     foreach ($rows as &$row) {
@@ -157,16 +168,7 @@ function production_enrich_link_counts(array &$rows, bool $includeCashPayments =
         $row['__accounts'] = $accounts;
         $row['CariBaglantisi'] = count($accountIds);
         $row['UrunBaglantisi'] = array_sum(array_map(fn(int $id):int=>$productCounts[$id]??0,$accountIds));
-        if ($includeCashPayments) {
-            $row['Yapılan Ödeme'] = $accountIds === [] ? null : 0;
-            $row['Son Ödeme Tarihi'] = null;
-            foreach ($accountIds as $id) {
-                $cashPayment = $paymentsByAccount[$id] ?? null;
-                if ($cashPayment === null) continue;
-                $row['Yapılan Ödeme'] += (float)$cashPayment['total'];
-                if (($cashPayment['last_date'] ?? '') > ($row['Son Ödeme Tarihi'] ?? '')) $row['Son Ödeme Tarihi'] = $cashPayment['last_date'];
-            }
-        }
+
     }
     unset($row);
 }
@@ -350,7 +352,7 @@ function production_list(int $page, int $perPage, string $query, string $view, s
     $statement = cup_db()->prepare($sql);
     $statement->execute($params);
     $rows = $statement->fetchAll();
-    production_enrich_link_counts($rows, $view !== 'balances');
+    production_enrich_link_counts($rows);
     foreach ($rows as &$row) {
         if (production_email_is_placeholder((string)($row['YazarinEpostasi'] ?? ''))) $row['YazarinEpostasi'] = 'Belirtilmemiş';
     }
@@ -358,9 +360,9 @@ function production_list(int $page, int $perPage, string $query, string $view, s
     return [
         'rows'=>$rows,
         'columns'=>array_merge(['ID','KitabinAdi','YazarinAdi','YazarinEpostasi','Paket','SozlesmeTarihi'],
-            $view === 'balances' ? ['UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi'] : ['Yapılan Ödeme','Son Ödeme Tarihi'], ['UrunBaglantisi']),
+            $view === 'balances' ? ['UretimMaliyeti','AlinanOdeme','Kalan','CariBaglantisi'] : [], ['UrunBaglantisi']),
         'sortable_columns'=>$sortColumns,
-        'money_columns'=>$view === 'balances' ? ['UretimMaliyeti','AlinanOdeme','Kalan'] : ['Yapılan Ödeme'],
+        'money_columns'=>$view === 'balances' ? ['UretimMaliyeti','AlinanOdeme','Kalan'] : [],
         'currency'=>setting_get('default_currency','TL'),
         'page'=>$page,'per_page'=>$perPage,'total'=>$total,'pages'=>max(1,(int) ceil($total/$perPage)),
         'sort'=>$sort,'dir'=>strtolower($direction),'view'=>$view,
