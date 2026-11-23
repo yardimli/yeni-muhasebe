@@ -157,6 +157,7 @@ try {
             LEFT JOIN `faturaturleri` ft ON ft.`ID` = fb.`FaturaTuru`
             LEFT JOIN `adresdefteri` a ON a.`ID` = CAST(fb.`MusteriID` AS UNSIGNED)
             LEFT JOIN `asp_urun` u ON u.`ID` = fd.`urunID`';
+        $lineTotal = business_report_line_total('fd');
         $select = "SELECT
             fd.`ID`, fb.`ID` AS `__faturaID`, fb.`faturaNo`, fb.`FaturaTarih`,
             CASE
@@ -175,7 +176,7 @@ try {
             ) AS `urunAD`,
             CASE WHEN ft.`ID` IS NULL THEN CONVERT(CONCAT('Silinmiş tür (#', fb.`FaturaTuru`, ')') USING utf8mb4) ELSE CONVERT(ft.`FaturaTuru` USING utf8mb4) END AS `FaturaTuru`,
             fd.`miktar`, fd.`urunEder`, fd.`urunIndirim`, fd.`urunKDV`, fd.`urunKDVsizToplam`,
-            ROUND(COALESCE(fd.`miktar`, 0) * COALESCE(fd.`urunEder`, 0), 2) AS `SatirToplami`";
+            ROUND($lineTotal, 2) AS `SatirToplami`";
         $countStatement = db()->prepare('SELECT COUNT(*)' . $from . $where);
         $countStatement->execute($params);
         $total = (int) $countStatement->fetchColumn();
@@ -184,14 +185,9 @@ try {
         $statement->execute($params);
         $summaryStatement = db()->prepare("SELECT
             COALESCE(SUM(CASE WHEN fb.`FaturaTuru` = 1 THEN fd.`miktar` WHEN fb.`FaturaTuru` = 2 THEN -fd.`miktar` ELSE 0 END), 0) net_quantity,
-            COALESCE(SUM(CASE WHEN fb.`FaturaTuru` = 1 THEN fd.`miktar` * fd.`urunEder` WHEN fb.`FaturaTuru` = 2 THEN -(fd.`miktar` * fd.`urunEder`) ELSE 0 END), 0) net_total" . $from . $where);
+            COALESCE(SUM(CASE WHEN fb.`FaturaTuru` = 1 THEN ROUND($lineTotal,2) WHEN fb.`FaturaTuru` = 2 THEN -ROUND($lineTotal,2) ELSE 0 END), 0) net_total" . $from . $where);
         $summaryStatement->execute($params);
-        $totalsStatement = db()->prepare("SELECT
-            COALESCE(SUM(fd.`miktar`),0) `miktar`,COALESCE(SUM(fd.`urunEder`),0) `urunEder`,
-            COALESCE(SUM(fd.`urunIndirim`),0) `urunIndirim`,COALESCE(SUM(fd.`urunKDV`),0) `urunKDV`,
-            COALESCE(SUM(fd.`urunKDVsizToplam`),0) `urunKDVsizToplam`,
-            COALESCE(SUM(ROUND(COALESCE(fd.`miktar`,0)*COALESCE(fd.`urunEder`,0),2)),0) `SatirToplami`" . $from . $where);
-        $totalsStatement->execute($params);
+        $summary = $summaryStatement->fetch();
         $titleTable = $report === 'product_sales' ? 'asp_urun' : 'adresdefteri';
         $titleField = $report === 'product_sales' ? '`kitapadi`' : "COALESCE(NULLIF(`FirmaAd`, ''), NULLIF(TRIM(CONCAT_WS(' ', `Ad`, `Soyad`)), ''))";
         $titleStatement = db()->prepare('SELECT ' . $titleField . ' FROM ' . quoted_identifier($titleTable) . ' WHERE `ID` = ?');
@@ -209,9 +205,9 @@ try {
             'pages' => max(1, (int) ceil($total / $perPage)),
             'sort' => $sort,
             'dir' => strtolower($direction),
-            'summary' => $summaryStatement->fetch(),
-            'totals' => $totalsStatement->fetch(),
-            'numeric_columns' => ['miktar','urunEder','urunIndirim','urunKDV','urunKDVsizToplam','SatirToplami'],
+            'summary' => $summary,
+            'totals' => ['miktar'=>$summary['net_quantity'], 'SatirToplami'=>$summary['net_total']],
+            'numeric_columns' => ['miktar','SatirToplami'],
         ]);
     }
 

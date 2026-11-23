@@ -52,6 +52,7 @@
       z: Number(win.el.style.zIndex) || 0,
     };
     const s = win.state || {};
+    if (win.kind === 'submissions') return {...base, state: {form: s.form, label: s.label, page: s.page, filter: s.filter}};
     if (win.kind === 'table') return {...base, state: {table: s.table, label: s.label, filter: s.filter || null, periodFilter: s.periodFilter || null, titleLookup: s.titleLookup || null, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'report') return {...base, state: {report: s.report, id: s.id, label: s.label, titleLookup: s.titleLookup || null, page: s.page, perPage: s.perPage, q: s.q || '', sort: s.sort, dir: s.dir}};
     if (win.kind === 'business_report') return {...base, state: {report: s.report, label: s.label, page: s.page, perPage: s.perPage, sort: s.sort, dir: s.dir, grouping: s.grouping, preset: s.preset, start: s.start || '', end: s.end || '', chartExpanded: Boolean(s.chartExpanded)}};
@@ -79,7 +80,7 @@
   function storedWindowDescriptors() {
     try {
       const parsed = JSON.parse(localStorage.getItem(windowStorageKey) || '[]');
-      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings', 'production_list', 'production_report', 'production_project'].includes(item.kind) && item.state)
+      return Array.isArray(parsed) ? parsed.filter(item => item && ['table', 'report', 'business_report', 'invoice', 'editor', 'settings', 'production_list', 'production_report', 'production_project', 'submissions'].includes(item.kind) && item.state)
         .filter(item => item.kind !== 'production_list' || ['all','balances'].includes(item.state.view)) : [];
     } catch (_) {
       return [];
@@ -1171,6 +1172,129 @@
     } catch(error){grid.innerHTML=`<div class="p-8 text-center text-sm text-red-700">${escapeHtml(error.message)}</div>`;updateBusinessChartVisibility(win,false);}
   }
 
+  async function submissionsApi(action, values = null) {
+    const response = await fetch(`submissions_api.php?action=${action}`, {
+      cache: 'no-store', method: values ? 'POST' : 'GET',
+      headers: values ? {'Content-Type':'application/json', 'X-CSRF-Token':csrf} : {},
+      ...(values ? {body: JSON.stringify(values)} : {})
+    });
+    const data = await response.json().catch(() => ({error:'Geçersiz başvuru sunucu yanıtı.'}));
+    if (response.status === 401) location.reload();
+    if (!response.ok) throw new Error(data.error || 'Başvurular yüklenemedi.');
+    return data;
+  }
+
+  async function refreshSubmissionCounts() {
+    try {
+      const data = await submissionsApi('forms');
+      document.querySelectorAll('[data-open-submissions]').forEach(button => {
+        const form = data.forms.find(form => String(form.id) === button.dataset.openSubmissions);
+        button.textContent = button.dataset.label + (form && Number(form.unread) > 0 ? ` (${form.unread})` : '');
+        button.style.display = form && Number(form.total) > 0 ? '' : 'none';
+        button.title = form ? '' : 'Bu forma erişim artık mevcut değil.';
+      });
+    } catch (error) {
+      document.querySelectorAll('[data-open-submissions]').forEach(button => {
+        button.textContent = `${button.dataset.label} (?)`;
+        button.title = error.message;
+      });
+    }
+  }
+
+  async function openSubmissions(form, label, restoredState = null) {
+    const win = createWindow(`submissions:${form}`, label, 1150, 680);
+    if (win.loaded) return win;
+    win.loaded = true; win.kind = 'submissions';
+    win.state = {page:1, filter:'', ...restoredState, form, label};
+    win.body.innerHTML = `<div class="flex h-full flex-col"><div class="flex shrink-0 items-center gap-3 border-b border-slate-300 bg-slate-200 p-2"><button class="toolbar-button" data-refresh>↻ Yenile</button><label class="text-xs">Durum <select data-filter class="rounded border border-slate-300 p-2"><option value="">Tümü</option><option value="unread">Okunmamış</option><option value="read">Okunmuş</option><option value="trash">Çöp kutusu</option></select></label><span class="text-xs text-slate-600">Çift tıklayarak veya + menüsünden açın. Kalın yazılar okunmamış başvurulardır.</span></div><div data-grid class="min-h-0 flex-1 overflow-auto bg-white"></div><div class="flex shrink-0 items-center gap-3 border-t border-slate-300 p-2 text-xs"><span data-status role="status"></span><div class="ml-auto flex items-center gap-2"><button class="toolbar-button" data-prev>←</button><span data-page></span><button class="toolbar-button" data-next>→</button></div></div>`;
+    win.body.querySelector('[data-filter]').value = win.state.filter;
+    win.body.querySelector('[data-filter]').onchange = e => { win.state.filter=e.target.value; win.state.page=1; loadSubmissions(win); };
+    win.body.querySelector('[data-refresh]').onclick = () => { loadSubmissions(win); refreshSubmissionCounts(); };
+    win.body.querySelector('[data-prev]').onclick = () => { if(win.state.page>1) {win.state.page--;loadSubmissions(win);} };
+    win.body.querySelector('[data-next]').onclick = () => { if(win.state.page<win.state.pages) {win.state.page++;loadSubmissions(win);} };
+    await loadSubmissions(win);
+    return win;
+  }
+
+  async function loadSubmissions(win) {
+    const generation = win.submissionGeneration = (win.submissionGeneration || 0) + 1;
+    const status = win.body.querySelector('[data-status]');
+    status.textContent = 'Yükleniyor…';
+    win.body.querySelector('[data-prev]').disabled = win.body.querySelector('[data-next]').disabled = true;
+    try {
+      const s=win.state;
+      const data=await submissionsApi('list&'+new URLSearchParams({form:s.form,page:s.page,filter:s.filter}));
+      if (generation !== win.submissionGeneration) return;
+      s.page=data.page; s.pages=data.pages;
+      const grid=win.body.querySelector('[data-grid]');
+      closeRelationMenu();
+      grid.innerHTML=`<table class="w-full text-left text-xs"><thead class="sticky top-0 bg-slate-100"><tr><th class="w-4 border-b border-r px-2 py-2" aria-label="Başvuru seçenekleri"></th>${['Tarih (UTC)','Başvuru','Ekler'].map(label=>`<th class="border-b p-3">${label}</th>`).join('')}</tr></thead><tbody>${data.rows.map(row=>`<tr data-submission="${Number(row.id)}" class="border-b cursor-pointer hover:bg-blue-100 ${row.read_at ? '' : 'font-bold bg-blue-50'}"><td class="w-4 border-r border-slate-200 bg-slate-50 px-2 py-1"><button type="button" data-submission-menu aria-label="Başvuru seçenekleri" aria-haspopup="true" class="w-full select-none rounded border border-slate-300 bg-white px-2 py-1 text-center font-medium text-blue-700 hover:bg-blue-50">+</button></td><td class="whitespace-nowrap p-3">${escapeHtml(row.created_at)}</td><td class="p-3"><div class="break-words">${escapeHtml(row.summary)}</div>${row.preview ? `<p class="submission-body-preview">${escapeHtml(row.preview)}</p>` : ''}</td><td class="whitespace-nowrap p-3">${Number(row.attachments) ? Number(row.attachments)+' dosya' : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="p-8 text-center text-slate-500">Başvuru bulunamadı.</td></tr>'}</tbody></table>`;
+      grid.querySelectorAll('[data-submission]').forEach(row=>{
+        const id=Number(row.dataset.submission);
+        row.ondblclick=e=>{if(!e.target.closest('button,a'))openSubmission(id, s.form);};
+        const trigger=row.querySelector('[data-submission-menu]');
+        trigger.onclick=event=>{
+          event.preventDefault(); event.stopPropagation();
+          const items=[{action:{label:'Başvuruyu Aç'}, command:'open'}];
+          if(s.filter==='trash') items.push({action:{label:'Geri yükle'},command:'restore'},{action:{label:'Kalıcı sil'},command:'purge'});
+          openRelationMenu(trigger,items,item=>{
+            if(item.command==='open')openSubmission(id,s.form);
+            else submissionAction(item.command,id,trigger);
+          });
+        };
+      });
+      grid.onscroll=closeRelationMenu;
+      status.textContent=`${data.total} başvuru`;
+      win.body.querySelector('[data-page]').textContent=`${data.page} / ${data.pages}`;
+      win.body.querySelector('[data-prev]').disabled=data.page<=1;
+      win.body.querySelector('[data-next]').disabled=data.page>=data.pages;
+      scheduleSaveOpenWindows();
+    } catch(error) { if(generation===win.submissionGeneration) status.textContent=error.message; }
+  }
+
+  async function refreshSubmissionWindows() {
+    await Promise.all([refreshSubmissionCounts(), ...[...windows.values()].filter(win=>win.kind==='submissions').map(loadSubmissions)]);
+  }
+
+  async function submissionAction(action, id, button) {
+    if (action === 'purge' && !confirm('Bu başvuru ve yüklenen ekleri kalıcı olarak silinecek. Bu işlem geri alınamaz. Devam edilsin mi?')) return;
+    button.disabled = true;
+    try {
+      await submissionsApi(action, {id, ...(action === 'read' ? {read:false} : {})});
+      const detail = windows.get(`submission:${id}`);
+      if (detail) closeWindow(detail);
+      await refreshSubmissionWindows();
+      toast(({read:'Başvuru okunmamış olarak işaretlendi.',trash:'Başvuru çöp kutusuna taşındı.',restore:'Başvuru geri yüklendi.',purge:'Başvuru kalıcı olarak silindi.'})[action]);
+    } catch(error) { toast(error.message,'error'); }
+    finally { button.disabled = false; }
+  }
+
+  async function openSubmission(id, form) {
+    const win=createWindow(`submission:${id}`,`Başvuru #${id}`,900,740,{relationship:true});
+    if(win.opening) return;
+    win.opening=true;
+    try {
+      const {submission:item}=await submissionsApi('open',{id});
+      const trashed=Boolean(item.deleted_at);
+      const valueText=value=>value && typeof value==='object' ? Object.values(value).map(valueText).join(', ') : String(value??'');
+      const fileCards=item.files.map(file=>{
+        const unavailable=Number(file.is_placeholder) || trashed;
+        const extension=String(file.original_name).split('.').pop().slice(0,6).toUpperCase();
+        return `<li class="submission-file"><span class="submission-file-icon">${escapeHtml(extension)}</span><div class="submission-file-info"><div class="submission-file-name">${escapeHtml(file.original_name)}</div><span class="submission-muted">${Number(file.is_placeholder) ? 'Dosya aktarılmamış' : trashed ? 'İndirmek için başvuruyu geri yükleyin' : Number(file.size) ? Math.ceil(Number(file.size)/1024)+' KB' : 'Ek dosya'}</span></div>${unavailable ? '' : `<a class="submission-download" href="submissions_api.php?action=download&id=${Number(file.id)}">İndir ↓</a>`}</li>`;
+      }).join('');
+      win.body.innerHTML=`<article class="submission-detail"><header class="submission-hero"><div class="submission-eyebrow">WEB SİTESİ BAŞVURUSU <span class="submission-badge ${trashed?'is-trash':''}">${trashed?'Çöp kutusunda':'Okundu'}</span></div><h2>${escapeHtml(item.title)}</h2><div class="submission-meta"><span>#${Number(item.id)}</span><span>${escapeHtml(item.created_at)} UTC</span></div><div class="submission-actions">${trashed ? '<button class="toolbar-button" data-detail-action="restore">↶ Geri yükle</button><button class="toolbar-button submission-danger" data-detail-action="purge">Kalıcı olarak sil</button>' : '<button class="toolbar-button" data-detail-action="read">✉ Okunmamış işaretle</button><button class="toolbar-button submission-danger" data-detail-action="trash">Çöp kutusuna taşı</button>'}</div></header><div class="submission-content">${trashed?'<div class="submission-trash-note">Bu başvuru çöp kutusunda. Geri yükleyebilir veya kalıcı olarak silebilirsiniz.</div>':''}<section class="submission-card"><h3>Başvuru bilgileri</h3><dl class="submission-detail-fields">${Object.entries(item.data).map(([label,value])=>`<div class="submission-detail-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(valueText(value)) || '<span class="submission-muted">—</span>'}</dd></div>`).join('')}</dl></section><section class="submission-card"><h3>Ekler <span class="submission-count">${item.files.length}</span></h3><ul class="submission-files">${fileCards || '<li class="submission-empty">Bu başvuruya dosya eklenmemiş.</li>'}</ul></section></div></article>`;
+      win.body.querySelectorAll('[data-detail-action]').forEach(button=>button.onclick=()=>submissionAction(button.dataset.detailAction,id,button));
+      await refreshSubmissionWindows();
+    } catch(error) {win.body.innerHTML=`<div class="p-4 text-red-700">${escapeHtml(error.message)}</div>`;}
+    finally {win.opening=false;}
+  }
+
+  document.querySelectorAll('[data-open-submissions]').forEach(button=>button.onclick=()=>openSubmissions(button.dataset.openSubmissions,button.dataset.label));
+  if(document.querySelector('[data-open-submissions]')) {
+    window.addEventListener('focus',refreshSubmissionCounts);
+    setInterval(()=>{if(!document.hidden)refreshSubmissionCounts();},60000);
+  }
+
   async function openProductionList(view = 'all', label = 'WebCin Projeleri', restoredState = null) {
     const win = createWindow(`production-list:${view}`, label, 1240, 720);
     if (win.loaded) return win;
@@ -1311,6 +1435,10 @@
     try {
       for (const descriptor of descriptors) {
         const s = descriptor.state;
+        if (descriptor.kind === 'submissions') {
+          if (permissions.has(`submissions:${s.form}`)) applyStoredWindowLayout(await openSubmissions(s.form, s.label, s), descriptor);
+          continue;
+        }
         let permission = ({table:`table:${s.table}`, editor:`table:${s.table}`, invoice:'table:faturabaslik', report:`table:${s.report === 'product_sales' ? 'asp_urun' : 'adresdefteri'}`, business_report:`report:${s.report}`, settings:'settings:currency', production_list:`production:${s.view === 'balances' ? 'balances' : 'all'}`, production_report:`production:report:${s.report}`, production_project:s.id ? (permissions.has('production:all') ? 'production:all' : permissions.has('production:balances') ? 'production:balances' : 'production:new') : 'production:new'})[descriptor.kind];
         if (permission && !permissions.has(permission)) continue;
         if (typeof s.label === 'string') s.label = s.label.replaceAll('Üretim', 'WebCin');

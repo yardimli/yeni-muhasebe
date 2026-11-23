@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once APP_ROOT . '/app/submission_service.php';
+
 function menu_catalog(): array
 {
     static $menus;
@@ -13,6 +15,9 @@ function menu_catalog(): array
         'production:report:returning_authors' => $item('Geri Dönen Yazarlar', 'data-open-production-report', 'returning_authors'),
         'production:report:package_distribution' => $item('Paket Dağılımı', 'data-open-production-report', 'package_distribution'),
     ]];
+    foreach (submission_menu_forms() as $form) {
+        $menus['WebCin']['submissions:' . $form['id']] = $item($form['title'], 'data-open-submissions', (string)$form['id']) + ['unread'=>(int)$form['unread'], 'submission_total'=>(int)$form['total']];
+    }
     foreach (require APP_ROOT . '/app/schema.php' as $table => $config) {
         $menus[$config['group']]['table:' . $table] = $item($config['label'], 'data-open-table', $table);
     }

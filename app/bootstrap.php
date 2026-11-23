@@ -3,6 +3,18 @@ declare(strict_types=1);
 
 const APP_ROOT = __DIR__ . '/..';
 
+function app_asset_url(string $name): string
+{
+    if (!in_array($name, ['app.css', 'app.js'], true)) throw new InvalidArgumentException('Unknown application asset.');
+    static $versions = [];
+    if (!isset($versions[$name])) {
+        $hash = hash_file('sha256', APP_ROOT . '/public/assets/' . $name);
+        if ($hash === false) throw new RuntimeException('Application asset is missing: ' . $name);
+        $versions[$name] = substr($hash, 0, 16);
+    }
+    return 'assets/' . $name . '?v=' . $versions[$name];
+}
+
 function app_env(): array
 {
     static $env;
@@ -27,6 +39,12 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     ]);
     session_start();
 }
+
+// Set after session_start(), which otherwise replaces cache headers.
+// Static assets do not load this bootstrap and retain normal browser caching.
+header('Cache-Control: private, no-store, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 
 function storage_path(string $file = ''): string
 {

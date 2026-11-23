@@ -2,6 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+.submission-body-preview { margin-top: 5px; max-width: 65rem; font-size: 11px; line-height: 1.5; font-weight: 400; color: #64748b; overflow-wrap: anywhere; }
+
+.submission-detail-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 1.25rem; padding: .75rem 0; border-bottom: 1px solid #e2e8f0; align-items: start; }
+.submission-detail-row dt, .submission-detail-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.submission-detail { height: 100%; overflow: auto; background: #f1f5f9; color: #1e293b; container-type: inline-size; }
+.submission-hero { display: grid; grid-template-columns: minmax(0,1fr) auto; column-gap: 20px; row-gap: 4px; padding: 12px 22px; background: linear-gradient(120deg,#fff,#eff6ff); border-bottom: 1px solid #dbe4ef; }
+.submission-hero > :not(.submission-actions) { grid-column: 1; }
+.submission-eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #64748b; }
+.submission-badge { padding: 4px 10px; border-radius: 20px; background: #dcfce7; color: #166534; letter-spacing: 0; font-size: 11px; }
+.submission-badge.is-trash { background: #ffedd5; color: #9a3412; }
+.submission-hero h2 { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 700; letter-spacing: -.025em; }
+.submission-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; font-size: 12px; color: #64748b; }
+.submission-actions { grid-column: 2; grid-row: 1 / 4; align-self: center; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+@container (max-width: 650px) { .submission-actions { flex-direction: column; } }
+@container (max-width: 440px) { .submission-hero { grid-template-columns: minmax(0,1fr); } .submission-actions { grid-column: 1; grid-row: auto; flex-direction: row; margin-top: 4px; } }
+.submission-danger { color: #b91c1c; border-color: #fecaca; }
+.submission-content { padding: 22px; display: grid; gap: 18px; }
+.submission-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 2px 4px #0f172a05; overflow: hidden; }
+.submission-card h3 { display: flex; align-items: center; gap: 8px; padding: 15px 20px; border-bottom: 1px solid #e2e8f0; font-size: 13px; font-weight: 700; }
+.submission-detail-fields { padding: 0 20px; }
+.submission-card .submission-detail-row { padding: 16px 0; font-size: 13px; line-height: 1.6; }
+.submission-detail-row:last-child { border-bottom: 0; }
+.submission-detail-row dt { color: #64748b; font-weight: 500; }
+.submission-detail-row dd { white-space: pre-wrap; color: #0f172a; }
+.submission-count { padding: 1px 7px; border-radius: 12px; background: #eef2ff; color: #4338ca; font-size: 11px; }
+.submission-files { padding: 8px 20px; }
+.submission-file { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+.submission-file:last-child { border-bottom: 0; }
+.submission-file-icon { flex-shrink: 0; padding: 12px 6px; min-width: 44px; text-align: center; border-radius: 8px; background: #eff6ff; color: #2563eb; font-size: 10px; font-weight: 700; }
+.submission-file-info { flex: 1; min-width: 0; }
+.submission-file-name { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.submission-muted { color: #94a3b8; font-size: 12px; }
+.submission-download { flex-shrink: 0; padding: 7px 12px; border: 1px solid #bfdbfe; border-radius: 6px; color: #2563eb; font-size: 12px; font-weight: 600; }
+.submission-download:hover { background: #eff6ff; }
+.submission-empty { padding: 20px 0; color: #94a3b8; font-size: 13px; }
+.submission-trash-note { padding: 12px 16px; border: 1px solid #fed7aa; border-radius: 8px; background: #fff7ed; color: #9a3412; font-size: 12px; }
+
 .product-lookup-dialog { width: min(640px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px); }
 .product-lookup-dialog::backdrop { background: rgb(15 23 42 / 65%); }
 

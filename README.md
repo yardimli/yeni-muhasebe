@@ -19,6 +19,22 @@ For regular users, select both a main menu and its permitted items. Administrato
 
 **WebCin** is the first menu. **Pencere → Tümünü Kapat** closes all windows, including minimized ones, after a single confirmation if there are unsaved edits. **Raporlar → E-postaları Dışa Aktar** downloads all Cari or WebCup project email addresses as UTF-8 CSV (`Name,Email`). Exports split multiple addresses, deduplicate case-insensitively, skip invalid addresses and the application's known placeholder address, and protect spreadsheet formula-like names.
 
+## WebCin form inboxes
+
+Each form in `cinius_laravel.request_forms` appears directly in **WebCin**, with its unread submission count in parentheses. Each opens a desktop inbox with UTC dates, attachment counts, read/unread checkboxes, filters, and pagination. Double-click a row or choose **Aç** to open its fields and attachments and mark it read. Read status is shared with Laravel; trashed entries are excluded. Imported placeholder files are labeled unavailable.
+
+The connection uses the existing `DB_HOST`, `DB_PORT`, `DB_USERNAME`, and `DB_PASSWORD`, with `DB_DATABASE_SUBMISSIONS=cinius_laravel`. Files are read under `CINIUS_LARAVEL_ROOT=/var/www/cinius-laravel` in `storage/app`. These are defaults; optional overrides are shown in `.env.example`. The database account needs SELECT on `request_forms`, `submissions`, and `submission_files`, plus UPDATE on `submissions.read_at`, `updated_at`, and `deleted_at`, and DELETE on `submissions` and `submission_files`. Laravel's submission review-flags migration must be applied. The PHP process must be able to read attachment files and remove files from submission upload directories for permanent deletion.
+
+Administrators see all form inboxes. Grant regular users **WebCin** and each desired form in **Kullanıcı Yönetimi**. APIs and downloads enforce those permissions. Counts refresh after changes, on focus, and every minute while visible. If the submissions database is unavailable when the desktop loads, its form menus are omitted and the error is logged; reload after restoring connectivity.
+
+Verify with `php tests/submissions_smoke.php` (isolated SQLite write fixtures and read-only checks against the configured submissions database).
+
+The detail view offers **Okunmamış işaretle** and **Çöp kutusuna taşı**. Select **Çöp kutusu** in the inbox status filter to inspect trashed entries, restore them, or permanently delete them after confirmation. Permanent deletion is restricted to trashed entries and removes their database records and owned upload files; imported placeholder/shared files are retained. Marking unread closes the detail window so it stays unread. These actions use the same per-form permissions and are audited.
+
+## Browser caching
+
+Dynamic PHP pages and APIs send `Cache-Control: private, no-store` (APIs may send additional no-cache directives), so session-specific menus and permissions are fetched afresh. CSS and JavaScript URLs contain a SHA-256 content version: unchanged assets keep the same URL and remain cacheable; changed files automatically receive a new URL. Deploy PHP, JavaScript, and the built CSS together, then reload open desktops. A proxy/CDN must respect PHP cache headers and include the `v` query parameter in its static-asset cache key. If a proxy previously cached HTML despite these headers, purge that HTML once after deployment. PHP OPcache deployment/reload settings are separate from browser caching.
+
 ## Safety notes
 
 - Legacy databases may use MyISAM. Cleanup tab 9 previews and converts remaining MyISAM base tables to InnoDB; it does not create foreign keys automatically.

@@ -51,7 +51,7 @@ $user = current_user();
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="<?= h(csrf_token()) ?>">
     <title><?= h(env_value('APP_NAME', 'Cinius Muhasebe')) ?></title>
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="<?= h(app_asset_url('app.css')) ?>">
     <style>.report-submenu{display:none;position:absolute;left:100%;top:-.25rem;min-width:18rem;border:1px solid #475569;border-radius:.25rem;background:#1e293b;padding:.25rem 0;box-shadow:0 20px 25px -5px rgba(0,0,0,.25)}.report-group:hover>.report-submenu{display:block}</style>
 </head>
 <body class="h-screen overflow-hidden bg-slate-900 font-sans text-slate-900">
@@ -95,7 +95,7 @@ $user = current_user();
                                         <div class="report-submenu">
                                 <?php endif; ?>
                                 <?php foreach ($entries as $key => $item): $tag = $item['attribute'] === 'href' ? 'a' : 'button'; ?>
-                                    <<?= $tag ?> <?= $tag === 'button' ? 'type="button"' : '' ?> <?= h($item['attribute']) ?>="<?= h($item['value']) ?>" data-label="<?= h($item['label']) ?>" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><?= h($item['label']) ?></<?= $tag ?>>
+                                    <<?= $tag ?> <?= $tag === 'button' ? 'type="button"' : '' ?> <?= h($item['attribute']) ?>="<?= h($item['value']) ?>" data-label="<?= h($item['label']) ?>" <?= isset($item['submission_total']) && $item['submission_total'] === 0 ? 'style="display:none"' : '' ?> class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm hover:bg-blue-600"><?= h($item['label']) ?><?= !empty($item['unread']) ? ' (' . (int)$item['unread'] . ')' : '' ?></<?= $tag ?>>
                                 <?php endforeach; ?>
                                 <?php if ($section !== ''): ?></div></div><?php endif; ?>
                             <?php endforeach; ?>
@@ -119,7 +119,7 @@ $user = current_user();
     </div>
     <div id="toast-region" class="fixed bottom-14 right-4 z-[20000] flex w-80 flex-col gap-2"></div>
     <script id="access-permissions" type="application/json"><?= json_encode(array_values(array_filter(array_merge(...array_values(array_map('array_keys', menu_catalog()))), 'can_access')), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
-    <script src="assets/app.js?v=<?= (int) (@filemtime(__DIR__ . '/assets/app.js') ?: time()) ?>" defer></script>
+    <script src="<?= h(app_asset_url('app.js')) ?>" defer></script>
 <?php endif; ?>
 </body>
 </html>

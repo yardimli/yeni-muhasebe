@@ -193,7 +193,7 @@ function cleanup_result_label(string $key): string
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Veri Temizleme — Cinius Muhasebe</title>
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="<?= h(app_asset_url('app.css')) ?>">
 </head>
 <body class="min-h-screen bg-slate-100 text-slate-900">
 <header class="border-b border-slate-700 bg-slate-900 text-white">
